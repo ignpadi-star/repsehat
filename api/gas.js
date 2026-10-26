@@ -9,20 +9,34 @@ export default async function handler(req, res) {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(req.body)
+        body: JSON.stringify(req.body || {})
       }
     );
 
-    const result = await response.json();
+    const text = await response.text();
 
-    res.status(200).json(result);
+    try {
+
+      const json = JSON.parse(text);
+
+      return res.status(200).json(json);
+
+    } catch {
+
+      return res.status(200).json({
+        success: true,
+        raw: text
+      });
+
+    }
 
   } catch (error) {
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message
     });
 
   }
+
 }
