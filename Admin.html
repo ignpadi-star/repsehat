@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<?!= include('Style') ?>
+</head>
+<body>
+
+<div class="login-wrap" id="loginView">
+  <div class="card login-card">
+    <h2>Masuk</h2>
+    <p class="muted">Admin &amp; petugas pendaftaran</p>
+    <form id="loginForm">
+      <div class="field"><label>Username</label><input type="text" id="lUser" autocomplete="username" autocapitalize="off"></div>
+      <div class="field"><label>Password</label><input type="password" id="lPass" autocomplete="current-password"></div>
+      <button class="btn" style="width:100%" id="btnLogin" type="submit">Masuk</button>
+    </form>
+  </div>
+</div>
+
+<div id="appView" hidden>
+  <header class="topbar">
+    <img id="tLogo" hidden alt="">
+    <div class="t" id="tTitle"></div>
+    <div class="u" id="tUser"></div>
+    <button class="btn btn-sm btn-ghost" style="color:#fff;border-color:rgba(255,255,255,.4)" id="btnLogout">Keluar</button>
+  </header>
+  <div class="layout">
+    <nav id="nav"></nav>
+    <main id="main"></main>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="printArea"></div>
+<div id="toast"></div>
+
+<?!= include('JS_Shared') ?>
+<script>
+var S={token:null,user:null,cfg:{},fields:[],records:[],users:[],kategori:[],jenis:[],talkshow:[],tsRecords:[],tq:'',tflt:'all',tft:'',tsel:{},tab:'pendaftar',q:'',sel:{},flt:'all',fj:'',started:false};
+var TYPES=[['text','Teks'],['number','Angka'],['tel','No. Telepon'],['email','Email'],['date','Tanggal'],['textarea','Teks Panjang'],['select','Dropdown'],['radio','Pilihan (radio)']];
+
+/* ---------- LOGIN ---------- */
+$('loginForm').onsubmit=function(e){
+  e.preventDefault();
+  var b=$('btnLogin'); b.disabled=true;
+  api('login',$('lUser').value,$('lPass').value).then(function(r){
+    S.token=r.token; try{sessionStorage.setItem('tk',r.token);}catch(x){}
+    return boot();
+  }).catch(function(err){toast(err.message,'err');}).then(function(){b.disabled=false;});
+};
+$('btnLogout').onclick=function(){
+  api('logout',S.token).catch(function(){});
+  try{sessionStorage.removeItem('tk');}catch(x){}
+  location.reload();
+};
+
+function boot(){
+  return api('adminBootstrap',S.token).then(function(b){
+    S.user=b.user;S.cfg=b.settings;S.fields=b.fields;S.records=b.records;S.users=b.users||[];S.kategori=b.kategori||[];S.jenis=b.jenis||[];S.talkshow=b.talkshow||[];S.tsRecords=b.tsRecords||[];
+    if(!S.started){S.started=true;S.tab=S.user.role==='admin'?'dashboard':'pendaftar';}
+    applyTheme(S.cfg);
+    $('loginView').hidden=true;$('appView').hidden=false;
+    $('tTitle').textContent=S.cfg.eventName+' — Admin';
+    $('tUser').textContent=S.user.nama+' ('+S.user.role+')';
+    if(S.cfg.logoUrl){$('tLogo').src=S.cfg.logoUrl;$('tLogo').hidden=false;}else $('tLogo').hidden=true;
+    renderNav(); renderTab();
+  });
+}
+
+function activeFields(){return fieldsFor('pk');}
+
+/* ---------- NAV ---------- */
+function renderNav(){
+  var tabs=[];
+  if(S.user.role==='admin') tabs.push(['dashboard','📊 Dashboard']);
+  tabs.push(['pendaftar','📋 Pendaftar'],['tspendaftar','🎤 Pendaftar Talkshow']);
+  if(S.user.role==='admin') tabs.push(['tampilan','🎨 Tampilan Halaman'],['formulir','🧩 Field Formulir'],['kategori','👤 Kategori Pendaftar'],['jenis','🩺 Jenis & Kuota'],['talkshow','🎤 Talkshow & Kuota'],['daftarhadir','🖨️ Cetak Daftar Hadir'],['user','👥 Petugas & User']);
+  tabs.push(['akun','🔑 Akun Saya']);
+  $('nav').innerHTML=tabs.map(function(t){
+    return '<button data-t="'+t[0]+'" class="'+(S.tab===t[0]?'on':'')+'">'+t[1]+'</button>';
+  }).join('');
+  Array.prototype.forEach.call($('nav').querySelectorAll('button'),function(b){
+    b.onclick=function(){S.tab=b.dataset.t;renderNav();renderTab();};
+  });
+}
+function renderTab(){
+  ({dashboard:tabDashboard,pendaftar:tabPendaftar,tampilan:tabTampilan,formulir:tabFormulir,kategori:tabKategori,jenis:tabJenis,talkshow:tabTalkshow,daftarhadir:tabDaftarHadir,tspendaftar:tabTsPendaftar,user:tabUser,akun:tabAkun})[S.tab]();
+}
+
+/* ---------- MODAL ---------- */
+function openModal(title,body,onSave,saveLabel){
+  var root=$('modalRoot');
+  root.innerHTML='<div class="modal-bg"><div class="modal"><h3>'+esc(title)+'</h3><div id="mBody">'+body+'</div>'+
+    '<div class="actions"><button class="btn btn-ghost" id="mCancel">Batal</button>'+
+    (onSave?'<button class="btn" id="mSave">'+(saveLabel||'Simpan')+'</button>':'')+'</div></div></div>';
+  $('mCancel').onclick=closeModal;
+  if(onSave) $('mSave').onclick=function(){
+    var b=$('mSave'); b.disabled=true;
+    Promise.resolve(onSave()).catch(function(e){toast(e.message,'err');}).then(function(){var x=$('mSave');if(x)x.disabled=false;});
+  };
+}
+function closeModal(){$('modalRoot').innerHTML='';}
+
+/* ---------- TAB PENDAFTAR ---------- */
+function tabPendaftar(){
+  var fs=activeFields(), isAdmin=S.user.role==='admin';
+  var show=fs.slice(0,3);
+  var q=S.q.toLowerCase();
+  var rows=S.records.filter(function(r){
+    if(S.flt==='hadir'&&!r.hadir) return false;
+    if(S.flt==='belum'&&r.hadir) return false;
+    if(S.fj&&r.jenis.indexOf(S.fj)<0) return false;
+    if(!q) return true;
+    return r.nomor.toLowerCase().indexOf(q)>=0 || Object.keys(r.data).some(function(k){return String(r.data[k]).toLowerCase().indexOf(q)>=0;});
+  });
+  var today=wibToday();
+  var nHadir=S.records.filter(function(r){return r.hadir;}).length;
+  var nToday=S.records.filter(function(r){return r.timestamp.slice(0,10)===today;}).length;
+  var h='<div class="stat"><div><b>'+S.records.length+'</b><span>Total pendaftar</span></div><div><b>'+nToday+'</b><span>Hari ini</span></div>'+
+    '<div><b>'+S.records.filter(function(r){return r.sumber==='manual';}).length+'</b><span>Input manual</span></div>'+
+    '<div><b style="color:var(--ok)">'+nHadir+'</b><span>Sudah hadir</span></div></div>';
+  h+='<div class="panel" style="padding:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><b>Check-in cepat</b>'+
+     '<input type="text" id="ciBox" placeholder="Ketik nomor, mis. 12 atau PK-0012" style="max-width:260px" autocapitalize="characters">'+
+     '<button class="btn btn-sm" id="btnCi" style="background:var(--ok)">✔ Tandai Hadir</button>'+
+     '<button class="btn btn-sm btn-accent" id="btnScan">📷 Scan QR</button></div>';
+  h+='<div class="toolbar"><input type="text" id="qBox" placeholder="Cari nomor / nama…" value="'+esc(S.q)+'">'+
+     '<select id="fltBox" style="max-width:160px"><option value="all">Semua</option><option value="hadir">Sudah hadir</option><option value="belum">Belum hadir</option></select>'+
+     (S.jenis.length?'<select id="fjBox" style="max-width:200px"><option value="">Semua jenis</option>'+S.jenis.map(function(j){return '<option value="'+esc(j.id)+'">'+esc(j.nama)+'</option>';}).join('')+'</select>':'')+
+     '<span class="sp"></span><button class="btn btn-sm btn-accent" id="btnPrintSel">🖨️ Cetak Terpilih (0)</button>'+
+     '<button class="btn btn-sm btn-accent" id="btnPrintAll">🖨️ Cetak Semua</button>'+
+     '<button class="btn btn-sm" id="btnAdd">＋ Input Manual</button>'+
+     '<button class="btn btn-sm btn-ghost" id="btnCsv">⬇ Ekspor CSV</button>'+
+     '<button class="btn btn-sm btn-ghost" id="btnRef">⟳ Muat Ulang</button></div>';
+  h+='<div class="tablewrap"><table class="t"><thead><tr><th><input type="checkbox" id="chkAll"></th><th>Nomor</th><th>Waktu</th>'+
+     show.map(function(f){return '<th>'+esc(f.label)+'</th>';}).join('')+'<th>Kategori</th><th>Jenis</th><th>Hadir</th><th>Sumber</th><th></th></tr></thead><tbody>';
+  if(!rows.length) h+='<tr><td colspan="'+(show.length+8)+'" style="text-align:center;color:#64748B;padding:30px">Belum ada data.</td></tr>';
+  rows.forEach(function(r){
+    h+='<tr><td><input type="checkbox" class="rowchk" data-n="'+esc(r.nomor)+'"'+(S.sel[r.nomor]?' checked':'')+'></td><td><b>'+esc(r.nomor)+'</b></td><td>'+esc(r.timestamp)+'</td>'+
+      show.map(function(f){return '<td>'+esc(r.data[f.id]||'-')+'</td>';}).join('')+
+      '<td>'+esc(r.kategori_nama||'-')+'</td><td>'+esc(r.jenis_nama||'-')+'</td>'+
+      '<td>'+(r.hadir
+        ?'<button class="btn btn-sm" style="background:var(--ok)" data-act="unhadir" data-n="'+esc(r.nomor)+'" title="Klik untuk membatalkan">✔ '+esc((r.waktu_hadir||'').slice(11,16))+'</button>'
+        :'<button class="btn btn-sm btn-ghost" data-act="hadir" data-n="'+esc(r.nomor)+'">Tandai hadir</button>')+'</td>'+
+      '<td><span class="badge '+(r.sumber==='manual'?'manual':'')+'">'+esc(r.sumber)+(r.dibuat_oleh?' · '+esc(r.dibuat_oleh):'')+'</span></td>'+
+      '<td style="white-space:nowrap"><button class="btn btn-sm" data-act="print" data-n="'+esc(r.nomor)+'">🖨️ Kartu</button>'+
+      (isAdmin?' <button class="btn btn-sm btn-ghost" data-act="edit" data-n="'+esc(r.nomor)+'">Edit</button> <button class="btn btn-sm btn-danger" data-act="del" data-n="'+esc(r.nomor)+'">Hapus</button>':'')+
+      '</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  $('main').innerHTML=h;
+  var qb=$('qBox'); qb.oninput=function(){S.q=qb.value;var p=qb.selectionStart;tabPendaftar();var n=$('qBox');n.focus();n.setSelectionRange(p,p);};
+  $('btnAdd').onclick=function(){openRecordForm(null);};
+  $('btnCsv').onclick=exportCsv;
+  $('fltBox').value=S.flt;
+  $('fltBox').onchange=function(){S.flt=this.value;tabPendaftar();};
+  var fj=$('fjBox'); if(fj){fj.value=S.fj;fj.onchange=function(){S.fj=this.value;tabPendaftar();};}
+  $('btnCi').onclick=quickCheckin;
+  $('btnScan').onclick=openScanner;
+  $('ciBox').onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();quickCheckin();}};
+
+  function selRecs(){
+    // urut nomor naik (data tersimpan terbaru di atas, jadi dibalik)
+    return S.records.filter(function(r){return S.sel[r.nomor];}).reverse();
+  }
+  function syncSel(){
+    var n=Object.keys(S.sel).length;
+    $('btnPrintSel').textContent='🖨️ Cetak Terpilih ('+n+')';
+    $('chkAll').checked=rows.length>0&&rows.every(function(r){return S.sel[r.nomor];});
+  }
+  syncSel();
+  $('chkAll').onchange=function(){
+    var on=this.checked;
+    rows.forEach(function(r){ if(on) S.sel[r.nomor]=true; else delete S.sel[r.nomor]; });
+    Array.prototype.forEach.call($('main').querySelectorAll('.rowchk'),function(c){c.checked=on;});
+    syncSel();
+  };
+  Array.prototype.forEach.call($('main').querySelectorAll('.rowchk'),function(c){
+    c.onchange=function(){
+      if(c.checked) S.sel[c.dataset.n]=true; else delete S.sel[c.dataset.n];
+      syncSel();
+    };
+  });
+  $('btnPrintSel').onclick=function(){
+    var recs=selRecs();
+    if(!recs.length){toast('Centang pendaftar yang ingin dicetak.','err');return;}
+    printCards(S.cfg,S.fields,recs);
+  };
+  $('btnPrintAll').onclick=function(){
+    if(!rows.length){toast('Tidak ada data untuk dicetak.','err');return;}
+    if(!confirm('Cetak '+rows.length+' kartu'+(S.q?' (sesuai hasil pencarian)':'')+'?')) return;
+    printCards(S.cfg,S.fields,rows.slice().reverse());
+  };
+  $('btnRef').onclick=function(){boot().then(function(){toast('Data diperbarui','ok');}).catch(function(e){toast(e.message,'err');});};
+  Array.prototype.forEach.call($('main').querySelectorAll('button[data-act]'),function(b){
+    b.onclick=function(){
+      var rec=S.records.filter(function(r){return r.nomor===b.dataset.n;})[0];
+      if(b.dataset.act==='print') printCard(S.cfg,S.fields,rec);
+      if(b.dataset.act==='hadir'||b.dataset.act==='unhadir') toggleHadir(rec,b.dataset.act==='hadir');
+      if(b.dataset.act==='edit') openRecordForm(rec);
+      if(b.dataset.act==='del') {
+        if(!confirm('Hapus pendaftar '+rec.nomor+'?')) return;
+        api('deletePendaftar',S.token,rec.nomor).then(function(){
+          S.records=S.records.filter(function(r){return r.nomor!==rec.nomor;});tabPendaftar();toast('Dihapus','ok');
+        }).catch(function(e){toast(e.message,'err');});
+      }
+    };
+  });
+}
+
+function openRecordForm(rec){
+  var body=pickHolder('pk')+'<div id="mFields_pk"></div>';
+  openModal(rec?'Edit '+rec.nomor:'Input Pendaftar Manual',body,function(){
+    var fs=fieldsFor('pk',modalKat('pk'));
+    var data=collectForm($('mBody'),fs);
+    var miss=missingRequired(fs,data);
+    if(miss){toast('"'+miss+'" wajib diisi.','err');return;}
+    var pk=pickCollect('pk',rec);
+    if(pk.err){toast(pk.err,'err');return;}
+    if(rec){
+      return api('updatePendaftar',S.token,rec.nomor,data,pk.changed?pk.kat:null,pk.changed?pk.ids:null).then(function(r){
+        rec.data=data;
+        if(r&&pk.changed){rec.kategori=r.kategori;rec.kategori_nama=r.kategori_nama;rec.jenis=r.jenis;rec.jenis_list=r.jenis_list;rec.jenis_nama=r.jenis_nama;}
+        closeModal();tabPendaftar();toast('Tersimpan','ok');
+      });
+    }
+    return api('addPendaftar',S.token,data,pk.kat,pk.ids).then(function(nr){
+      if(nr&&nr.duplicate){
+        alert((nr.label||'Nama')+' tersebut sudah terdaftar dengan nomor '+nr.nomor+(nr.jenis_nama?' ('+nr.jenis_nama+')':'')+'.');
+        S.q=nr.nomor;S.flt='all';S.fj='';closeModal();tabPendaftar();return;
+      }
+      S.records.unshift(nr);closeModal();tabPendaftar();toast('Tersimpan: '+nr.nomor,'ok');
+      if(confirm('Cetak kartu untuk '+nr.nomor+' sekarang?')) printCard(S.cfg,S.fields,nr);
+    });
+  });
+  pickInit('pk',rec);
+  drawModalFields('pk',rec?rec.data:{});
+}
+
+function exportCsv(){
+  var fs=S.fields;
+  var head=['Nomor','Waktu','Sumber','Dibuat oleh','Kategori','Jenis Pemeriksaan','Hadir','Waktu Hadir'].concat(fs.map(function(f){return f.label;}));
+  var q=function(v){return '"'+String(v==null?'':v).replace(/"/g,'""')+'"';};
+  var lines=[head.map(q).join(',')];
+  S.records.forEach(function(r){
+    lines.push([r.nomor,r.timestamp,r.sumber,r.dibuat_oleh,r.kategori_nama||'',r.jenis_nama||'',r.hadir?'Ya':'Tidak',r.waktu_hadir||''].concat(fs.map(function(f){return r.data[f.id]||'';})).map(q).join(','));
+  });
+  var blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+  var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='pendaftar-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+}
+
+/* ---------- KEHADIRAN ---------- */
+function wibToday(){return new Date(Date.now()+7*3600*1000).toISOString().slice(0,10);}
+function nameOf(r){var f=fieldsFor(r.tipe==='ts'?'ts':'pk')[0];return f?(r.data[f.id]||'-'):'-';}
+
+function toggleHadir(rec,val){
+  if(!val&&!confirm('Batalkan kehadiran '+rec.nomor+'?')) return;
+  api('setHadir',S.token,rec.nomor,val).then(function(r){
+    rec.hadir=r.hadir;rec.waktu_hadir=r.waktu_hadir;rec.dicek_oleh=r.dicek_oleh;
+    renderTab();
+    toast(val?rec.nomor+' ditandai hadir':'Kehadiran dibatalkan','ok');
+  }).catch(function(e){toast(e.message,'err');});
+}
+
+function quickCheckin(){
+  var el=$('ciBox'); var v=el.value.trim().toUpperCase(); if(!v) return;
+  var rec;
+  if(/^\d+$/.test(v)){
+    var pk=(S.cfg.prefix||'PK')+'-'+('0000'+v).slice(-4), tk=(S.cfg.prefixTalkshow||'TS')+'-'+('0000'+v).slice(-4);
+    var a=findRec(pk), b2=findRec(tk);
+    if(a&&b2){toast('Nomor '+v+' ada di pemeriksaan dan talkshow. Ketik lengkap: '+pk+' atau '+tk+'.','err');return;}
+    v=b2?tk:pk; rec=a||b2;
+  } else rec=findRec(v);
+  if(!rec){toast('Nomor '+v+' tidak ditemukan.','err');return;}
+  if(rec.hadir){toast(v+' ('+nameOf(rec)+') sudah tercatat hadir pukul '+rec.waktu_hadir.slice(11,16)+'.');el.value='';el.focus();return;}
+  api('setHadir',S.token,v,true).then(function(r){
+    rec.hadir=true;rec.waktu_hadir=r.waktu_hadir;rec.dicek_oleh=r.dicek_oleh;
+    renderTab();
+    toast('✔ '+v+' — '+nameOf(rec)+' hadir','ok');
+    var n=$('ciBox'); if(n) n.focus();
+  }).catch(function(e){toast(e.message,'err');});
+}
+
+/* ---------- SCAN QR KEHADIRAN ---------- */
+var SC={stream:null,timer:0,det:null,last:'',lastT:0,count:0,cv:null};
+function scMsg(t,type){var e=$('scMsg');if(!e)return;e.textContent=t;e.className='scmsg '+(type||'');}
+function parseNomor(text){
+  var m=String(text||'').toUpperCase().match(/[A-Z0-9]{1,8}-\d{3,6}/);
+  return m?m[0]:'';
+}
+var _ac;
+function beep(ok){
+  try{
+    _ac=_ac||new (window.AudioContext||window.webkitAudioContext)();
+    var o=_ac.createOscillator(),g=_ac.createGain();
+    o.frequency.value=ok?880:220;g.gain.value=0.08;
+    o.connect(g);g.connect(_ac.destination);
+    o.start();o.stop(_ac.currentTime+(ok?0.12:0.3));
+  }catch(e){}
+}
+function loadJsQR(){
+  var urls=['https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js','https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js'];
+  return new Promise(function(res,rej){
+    if(window.jsQR) return res();
+    var i=0;
+    (function next(){
+      if(i>=urls.length) return rej(new Error('Pustaka pemindai gagal dimuat. Periksa koneksi internet.'));
+      var s=document.createElement('script');
+      s.src=urls[i++];
+      s.onload=function(){ if(window.jsQR) res(); else next(); };
+      s.onerror=function(){ s.remove(); next(); };
+      document.head.appendChild(s);
+    })();
+  });
+}
+function prepDecoder(){
+  if('BarcodeDetector' in window){
+    try{SC.det=new BarcodeDetector({formats:['qr_code']});return Promise.resolve();}catch(e){SC.det=null;}
+  }
+  return loadJsQR();
+}
+function camErr(e){
+  var n=e&&e.name;
+  if(n==='NotAllowedError'||n==='SecurityError') return 'Kamera langsung tidak bisa dibuka. Jika izin kamera sudah diberikan, penyebabnya Google Apps Script memblokir kamera di halaman ini. Tekan tombol "Foto QR" di bawah: kamera ponsel akan terbuka, foto QR pada kartu, dan kehadiran langsung tercatat.';
+  if(n==='NotFoundError'||n==='OverconstrainedError') return 'Kamera tidak ditemukan di perangkat ini.';
+  return (e&&e.message)?e.message:'Kamera tidak dapat dibuka.';
+}
+function openScanner(){
+  SC.last='';SC.lastT=0;SC.count=0;
+  openModal('Scan QR Kehadiran',
+    '<div class="scanbox" id="scBox"><video id="scVideo" playsinline muted></video><div class="scanframe"></div></div>'+
+    '<div class="scmsg" id="scMsg">Mengaktifkan kamera…</div>'+
+    '<div style="margin-top:10px;text-align:center"><label class="btn btn-sm btn-accent" style="cursor:pointer">📸 Foto QR<input type="file" id="scFile" accept="image/*" capture="environment" hidden></label></div>'+
+    '<p style="font-size:12px;color:#64748B;margin:10px 0 0">Arahkan kamera ke QR pada kartu pendaftar. Pemindaian berjalan terus sampai jendela ini ditutup. Jika kamera langsung tidak bisa dibuka, tekan Foto QR: kamera ponsel terbuka, foto QR pada kartu, dan kehadiran langsung tercatat. Cadangan lain: kolom Check-in cepat atau scanner barcode USB.</p>',null);
+  $('mCancel').textContent='Tutup';
+  $('mCancel').onclick=closeScanner;
+  $('scFile').onchange=onScanFile;
+  startScan();
+}
+function closeScanner(){stopScan();closeModal();}
+function stopScan(){
+  clearTimeout(SC.timer);SC.timer=0;
+  if(SC.stream){SC.stream.getTracks().forEach(function(t){t.stop();});SC.stream=null;}
+}
+function startScan(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    var bx0=$('scBox');if(bx0)bx0.style.display='none';
+    scMsg('Kamera langsung tidak tersedia di halaman ini. Tekan tombol "Foto QR" di bawah, atau pakai kolom Check-in cepat.','err');return;
+  }
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false})
+  .then(function(stream){
+    var v=$('scVideo');
+    if(!v){stream.getTracks().forEach(function(t){t.stop();});return Promise.reject(null);}
+    SC.stream=stream;v.srcObject=stream;
+    return v.play();
+  })
+  .then(prepDecoder)
+  .then(function(){scMsg('Arahkan kamera ke QR…','');scanLoop();})
+  .catch(function(e){if(e===null)return;stopScan();var bx=$('scBox');if(bx)bx.style.display='none';scMsg(camErr(e),'err');});
+}
+function scanLoop(){
+  if(!SC.stream) return;
+  var v=$('scVideo');
+  if(!v||v.readyState<2||!v.videoWidth){SC.timer=setTimeout(scanLoop,150);return;}
+  var p;
+  if(SC.det){
+    p=SC.det.detect(v).then(function(r){return r.length?r[0].rawValue:'';});
+  }else{
+    var w=Math.min(640,v.videoWidth),h=Math.round(v.videoHeight*w/v.videoWidth);
+    var cv=SC.cv||(SC.cv=document.createElement('canvas'));
+    cv.width=w;cv.height=h;
+    var cx=cv.getContext('2d',{willReadFrequently:true});
+    cx.drawImage(v,0,0,w,h);
+    var im=cx.getImageData(0,0,w,h);
+    var q=window.jsQR(im.data,w,h,{inversionAttempts:'dontInvert'});
+    p=Promise.resolve(q?q.data:'');
+  }
+  p.then(function(txt){if(txt)onScan(txt);}).catch(function(){})
+   .then(function(){if(SC.stream)SC.timer=setTimeout(scanLoop,SC.det?120:180);});
+}
+function decodeFile(file){
+  return new Promise(function(res,rej){
+    var url=URL.createObjectURL(file),img=new Image();
+    img.onload=function(){
+      URL.revokeObjectURL(url);
+      prepDecoder().then(function(){
+        var sizes=[1600,1000,600],i=0;
+        (function next(){
+          if(i>=sizes.length) return res('');
+          var m=Math.max(img.naturalWidth,img.naturalHeight),sc=Math.min(1,sizes[i++]/m);
+          var w=Math.max(1,Math.round(img.naturalWidth*sc)),h=Math.max(1,Math.round(img.naturalHeight*sc));
+          var cv=document.createElement('canvas');cv.width=w;cv.height=h;
+          var cx=cv.getContext('2d',{willReadFrequently:true});
+          cx.drawImage(img,0,0,w,h);
+          var p;
+          if(SC.det){
+            p=SC.det.detect(cv).then(function(r){return r.length?r[0].rawValue:'';});
+          }else{
+            var im=cx.getImageData(0,0,w,h);
+            var q=window.jsQR(im.data,w,h,{inversionAttempts:'attemptBoth'});
+            p=Promise.resolve(q?q.data:'');
+          }
+          p.then(function(t){if(t)res(t);else next();}).catch(function(){next();});
+        })();
+      }).catch(rej);
+    };
+    img.onerror=function(){URL.revokeObjectURL(url);rej(new Error('Foto tidak bisa dibaca.'));};
+    img.src=url;
+  });
+}
+function onScanFile(ev){
+  var f=ev.target.files&&ev.target.files[0];
+  ev.target.value='';
+  if(!f) return;
+  scMsg('Membaca foto…','');
+  decodeFile(f).then(function(txt){
+    if(txt){SC.last='';onScan(txt);}
+    else{beep(false);scMsg('QR tidak terbaca. Dekatkan kamera ke QR, pastikan fokus dan tidak buram, lalu foto lagi.','err');}
+  }).catch(function(e){scMsg((e&&e.message)||'Foto tidak bisa dibaca.','err');});
+}
+function onScan(txt){
+  var nomor=parseNomor(txt),now=Date.now();
+  if(!nomor){
+    if(txt!==SC.last||now-SC.lastT>3000){beep(false);scMsg('QR tidak dikenali (bukan kartu pendaftar).','err');}
+    SC.last=txt;SC.lastT=now;return;
+  }
+  if(nomor===SC.last&&now-SC.lastT<4000){SC.lastT=now;return;} // kartu yang sama masih di depan kamera
+  SC.last=nomor;SC.lastT=now;
+  var rec=findRec(nomor);
+  if(rec&&rec.hadir){
+    beep(false);
+    scMsg('Sudah tercatat hadir: '+nomor+' — '+nameOf(rec)+' (pukul '+(rec.waktu_hadir||'').slice(11,16)+')','warn');
+    return;
+  }
+  scMsg('Memproses '+nomor+'…','');
+  api('setHadir',S.token,nomor,true).then(function(r){
+    function done(rr){
+      if(rr){rr.hadir=true;rr.waktu_hadir=r.waktu_hadir;rr.dicek_oleh=r.dicek_oleh;}
+      if(!rr&&r.talkshow_nama) rr=null;
+      var nm=rr?nameOf(rr):'';
+      if(r.sudah){
+        beep(false);
+        scMsg('Sudah tercatat hadir: '+nomor+(nm?' — '+nm:'')+' (pukul '+(r.waktu_hadir||'').slice(11,16)+')','warn');
+      }else{
+        SC.count++;beep(true);if(navigator.vibrate)navigator.vibrate(120);
+        scMsg('✔ '+nomor+(nm?' — '+nm:'')+(rr&&(rr.jenis_nama||rr.talkshow_nama)?' · '+(rr.jenis_nama||rr.talkshow_nama):(r.talkshow_nama||r.jenis_nama?' · '+(r.talkshow_nama||r.jenis_nama):''))+'  (total '+SC.count+')','ok');
+      }
+      if(S.tab==='pendaftar'||S.tab==='tspendaftar') renderTab();
+    }
+    if(rec) return done(rec);
+    // pendaftar baru dari online yang belum ada di layar ini: muat ulang data dulu
+    return boot().then(function(){done(findRec(nomor));});
+  }).catch(function(e){beep(false);scMsg(e.message,'err');});
+}
+
+/* ---------- TAB DASHBOARD ---------- */
+var _dashTimer=null;
+function tabDashboard(){
+  var total=S.records.length;
+  var hadirList=S.records.filter(function(r){return r.hadir;});
+  var hadir=hadirList.length, belum=total-hadir;
+  var pct=total?Math.round(hadir*100/total):0;
+  var today=wibToday();
+  var daftarHariIni=S.records.filter(function(r){return r.timestamp.slice(0,10)===today;}).length;
+  var hadirHariIni=hadirList.filter(function(r){return r.waktu_hadir.slice(0,10)===today;}).length;
+  var latest=hadirList.slice().sort(function(a,b){return a.waktu_hadir<b.waktu_hadir?1:-1;}).slice(0,10);
+  var h='<div class="toolbar"><h3 style="flex:1">Dashboard Kehadiran</h3><button class="btn btn-sm btn-ghost" id="dRef">⟳ Muat Ulang</button></div>';
+  h+='<div class="stat big"><div><b>'+total+'</b><span>Total pendaftar</span></div>'+
+     '<div><b style="color:var(--ok)">'+hadir+'</b><span>Sudah hadir</span></div>'+
+     '<div><b style="color:var(--bad)">'+belum+'</b><span>Belum hadir</span></div>'+
+     '<div><b>'+pct+'%</b><span>Persentase hadir</span></div></div>';
+  h+='<div class="panel"><div class="bar"><i style="width:'+pct+'%"></i></div>'+
+     '<p style="margin:10px 0 0;font-size:13px;color:#64748B">'+hadir+' dari '+total+' pendaftar sudah hadir. Hari ini: '+daftarHariIni+' mendaftar, '+hadirHariIni+' hadir.</p></div>';
+  h+=jenisPanel()+talkshowSummary();
+  h+='<div class="panel"><h3>10 Kehadiran Terakhir</h3><div class="tablewrap"><table class="t"><thead><tr><th>Nomor</th>'+
+     '<th>'+esc((activeFields()[0]||{label:'Nama'}).label)+'</th><th>Waktu</th><th>Dicek oleh</th></tr></thead><tbody>'+
+     (latest.length?latest.map(function(r){
+        return '<tr><td><b>'+esc(r.nomor)+'</b></td><td>'+esc(nameOf(r))+'</td><td>'+esc(r.waktu_hadir)+'</td><td>'+esc(r.dicek_oleh)+'</td></tr>';
+      }).join(''):'<tr><td colspan="4" style="text-align:center;color:#64748B;padding:24px">Belum ada yang hadir.</td></tr>')+
+     '</tbody></table></div></div>';
+  $('main').innerHTML=h;
+  $('dRef').onclick=function(){boot().then(function(){toast('Data diperbarui','ok');}).catch(function(e){toast(e.message,'err');});};
+  if(!_dashTimer) _dashTimer=setInterval(function(){
+    if(S.token&&S.tab==='dashboard'&&!document.hidden){
+      api('adminBootstrap',S.token).then(function(b){S.records=b.records;S.tsRecords=b.tsRecords||S.tsRecords;S.kategori=b.kategori||S.kategori;S.jenis=b.jenis||S.jenis;S.talkshow=b.talkshow||S.talkshow;if(S.tab==='dashboard')tabDashboard();}).catch(function(){});
+    }
+  },30000);
+}
+
+/* ---------- KATEGORI PENDAFTAR (ANAK / ORANG TUA) ---------- */
+var KDRAFT=null;
+function katIds(){return S.kategori.map(function(k){return k.id;});}
+function katNameOf(id){var k=S.kategori.filter(function(x){return x.id===id;})[0];return k?k.nama:id;}
+function tabKategori(){
+  if(!KDRAFT) KDRAFT=JSON.parse(JSON.stringify(S.kategori));
+  $('main').innerHTML='<div class="panel"><h3>Kategori Pendaftar</h3>'+
+    '<p style="font-size:13px;color:#64748B;margin-top:0">Kategori ini muncul di halaman pendaftaran (mis. <b>Anak</b> dan <b>Orang Tua</b>). Pendaftar memilih kategorinya dulu, lalu hanya jenis pemeriksaan/talkshow yang diperuntukkan bagi kategori itu yang tampil. Centang <b>Boleh pilih &gt; 1</b> jika kategori tersebut boleh memilih lebih dari satu jenis pemeriksaan / talkshow (satu pendaftar tetap mendapat satu kartu). Atur jenis pemeriksaan dan talkshow per kategori di menu <b>Jenis &amp; Kuota</b> dan <b>Talkshow &amp; Kuota</b>. Jika hanya satu kategori aktif, pilihan kategori tidak ditampilkan.</p>'+
+    '<div id="kList"></div>'+
+    '<div style="display:flex;gap:10px;margin-top:12px"><button class="btn btn-ghost btn-sm" id="kAdd">＋ Tambah Kategori</button><button class="btn" id="kSave">Simpan</button></div></div>';
+  drawKategori();
+  $('kAdd').onclick=function(){
+    KDRAFT.push({id:'k'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),nama:'',multi_pk:false,multi_ts:false,active:true});
+    drawKategori();
+  };
+  $('kSave').onclick=function(){
+    var b=$('kSave'); b.disabled=true;
+    api('saveKategori',S.token,KDRAFT).then(function(l){
+      S.kategori=l;KDRAFT=null;JDRAFT=null;TDRAFT=null;FDRAFT=null;toast('Kategori tersimpan','ok');tabKategori();
+    }).catch(function(e){toast(e.message,'err');}).then(function(){b.disabled=false;});
+  };
+}
+function drawKategori(){
+  $('kList').innerHTML=KDRAFT.map(function(k,i){
+    return '<div class="krow'+(k.active?'':' inactive')+'" data-i="'+i+'">'+
+      '<input type="text" data-k="nama" value="'+esc(k.nama)+'" placeholder="Nama kategori, mis. Anak">'+
+      '<label class="chk"><input type="checkbox" data-k="multi_pk" '+(k.multi_pk?'checked':'')+'>Boleh pilih &gt; 1 pemeriksaan</label>'+
+      '<label class="chk"><input type="checkbox" data-k="multi_ts" '+(k.multi_ts?'checked':'')+'>Boleh pilih &gt; 1 talkshow</label>'+
+      '<label class="chk"><input type="checkbox" data-k="active" '+(k.active?'checked':'')+'>Aktif</label>'+
+      '<span style="white-space:nowrap"><button class="btn btn-sm btn-ghost" data-m="up">↑</button> <button class="btn btn-sm btn-ghost" data-m="down">↓</button> <button class="btn btn-sm btn-danger" data-m="del">✕</button></span></div>';
+  }).join('');
+  Array.prototype.forEach.call($('kList').querySelectorAll('.krow'),function(row){
+    var i=Number(row.dataset.i);
+    Array.prototype.forEach.call(row.querySelectorAll('[data-k]'),function(el){
+      el.onchange=el.oninput=function(){
+        var k=el.dataset.k;
+        KDRAFT[i][k]=el.type==='checkbox'?el.checked:el.value;
+        if(k==='active') drawKategori();
+      };
+    });
+    Array.prototype.forEach.call(row.querySelectorAll('[data-m]'),function(bt){
+      bt.onclick=function(){
+        var m=bt.dataset.m;
+        if(m==='up'&&i>0){var a=KDRAFT[i];KDRAFT[i]=KDRAFT[i-1];KDRAFT[i-1]=a;}
+        if(m==='down'&&i<KDRAFT.length-1){var b2=KDRAFT[i];KDRAFT[i]=KDRAFT[i+1];KDRAFT[i+1]=b2;}
+        if(m==='del'){
+          var id=KDRAFT[i].id, u=S.records.concat(S.tsRecords).filter(function(r){return r.kategori===id;}).length;
+          if(KDRAFT.length<=1){toast('Minimal harus ada 1 kategori.','err');return;}
+          if(!confirm('Hapus kategori "'+(KDRAFT[i].nama||'baru')+'"?'+(u?'\n\n'+u+' pendaftar memakai kategori ini. Data mereka tetap tersimpan, tetapi nama kategorinya tidak tampil lagi.':''))) return;
+          KDRAFT.splice(i,1);
+        }
+        drawKategori();
+      };
+    });
+  });
+}
+
+/* ---------- JENIS PEMERIKSAAN & KUOTA ---------- */
+function usedMap(except){
+  var m={};
+  S.records.forEach(function(r){ if(r.nomor===except) return; (r.jenis||[]).forEach(function(id){m[id]=(m[id]||0)+1;}); });
+  return m;
+}
+function jenisPanel(){
+  var act=S.jenis.filter(function(j){return j.active;});
+  if(!act.length) return '';
+  var used=usedMap(), hd={};
+  S.records.forEach(function(r){ if(r.hadir) (r.jenis||[]).forEach(function(id){hd[id]=(hd[id]||0)+1;}); });
+  return '<div class="panel"><h3>Per Jenis Pemeriksaan</h3><div class="jgrid">'+act.map(function(j){
+    var u=used[j.id]||0, pct=j.kuota===null?0:(j.kuota===0?100:Math.min(100,Math.round(u*100/j.kuota)));
+    return '<div class="jcard'+(j.kuota!==null&&u>=j.kuota?' full':'')+'"><b>'+esc(j.nama)+'</b>'+
+      '<small>'+esc(sasaranText(j))+'</small>'+
+      '<small>Terdaftar: <strong>'+u+'</strong>'+(j.kuota!==null?' / '+j.kuota:' (tanpa batas)')+'</small>'+
+      '<small>Hadir: <strong>'+(hd[j.id]||0)+'</strong></small>'+
+      (j.kuota!==null?'<div class="jbar"><i style="width:'+pct+'%"></i></div>':'')+'</div>';
+  }).join('')+'</div></div>';
+}
+function sasaranText(x){
+  if(!x.sasaran||!x.sasaran.length) return 'Semua kategori';
+  return x.sasaran.map(katNameOf).join(' & ');
+}
+
+/* editor daftar jenis pemeriksaan / talkshow (satu kode untuk keduanya) */
+var JDRAFT=null, TDRAFT=null;
+var ICFG={
+  pk:{title:'Jenis Pemeriksaan &amp; Kuota',list:'jenis',save:'saveJenis',idp:'j',add:'＋ Tambah Jenis',ph:'Nama pemeriksaan, mis. Pemeriksaan Gigi',noun:'jenis pemeriksaan',
+      intro:'Tambah atau hapus jenis pemeriksaan. Isi <b>Kuota</b> dengan jumlah maksimum pendaftar (kosongkan jika tanpa batas). Centang <b>Untuk kategori</b> siapa saja yang boleh memilihnya. Hilangkan centang <b>Aktif</b> untuk menutup satu jenis tanpa menghapusnya: jenis itu tidak tampil di pendaftaran, datanya tetap aman.'},
+  ts:{title:'Talkshow &amp; Kuota',list:'talkshow',save:'saveTalkshow',idp:'t',add:'＋ Tambah Talkshow',ph:'Nama talkshow, mis. Mengenal Kesehatan Remaja',noun:'talkshow',
+      intro:'Isi nama kegiatan talkshow, <b>Kuota</b> (kosongkan jika tanpa batas), dan centang <b>Untuk kategori</b> siapa saja yang boleh mendaftar. Talkshow punya pendaftaran sendiri (nomor, kartu, dan absensi terpisah) lewat tombol <b>Daftar Talkshow</b>. Hilangkan centang <b>Aktif</b> untuk menutup satu talkshow tanpa menghapusnya. Jika belum ada talkshow aktif, tombol Daftar Talkshow tidak muncul.'}
+};
+function tabJenis(){tabItems('pk');}
+function tabTalkshow(){tabItems('ts');}
+function itemDraft(kind){return kind==='ts'?TDRAFT:JDRAFT;}
+function itemUsed(kind){return kind==='ts'?tsUsedMap():usedMap();}
+function tabItems(kind){
+  var c=ICFG[kind];
+  if(!itemDraft(kind)){
+    var d=JSON.parse(JSON.stringify(S[c.list]));
+    d.forEach(function(x){x.sel=(x.sasaran&&x.sasaran.length)?x.sasaran.slice():katIds();});
+    if(kind==='ts') TDRAFT=d; else JDRAFT=d;
+  }
+  $('main').innerHTML='<div class="panel"><h3>'+c.title+'</h3>'+
+    '<p style="font-size:13px;color:#64748B;margin-top:0">'+c.intro+'</p>'+
+    '<div id="iList"></div>'+
+    '<div style="display:flex;gap:10px;margin-top:12px"><button class="btn btn-ghost btn-sm" id="iAdd">'+c.add+'</button><button class="btn" id="iSave">Simpan</button></div></div>';
+  drawItems(kind);
+  $('iAdd').onclick=function(){
+    itemDraft(kind).push({id:c.idp+Date.now().toString(36)+Math.random().toString(36).slice(2,5),nama:'',kuota:null,active:true,sel:katIds()});
+    drawItems(kind);
+  };
+  $('iSave').onclick=function(){
+    var b=$('iSave'); b.disabled=true;
+    var payload=itemDraft(kind).map(function(x){return {id:x.id,nama:x.nama,kuota:(x.kuota==null?'':String(x.kuota)),active:x.active,sasaran:x.sel};});
+    api(c.save,S.token,payload).then(function(l){
+      S[c.list]=l;if(kind==='ts')TDRAFT=null;else JDRAFT=null;toast(kind==='ts'?'Talkshow tersimpan':'Jenis pemeriksaan tersimpan','ok');tabItems(kind);
+    }).catch(function(e){toast(e.message,'err');}).then(function(){b.disabled=false;});
+  };
+}
+function drawItems(kind){
+  var c=ICFG[kind], D=itemDraft(kind), used=itemUsed(kind), kats=S.kategori;
+  $('iList').innerHTML=D.length?D.map(function(x,i){
+    return '<div class="jrow'+(x.active?'':' inactive')+'" data-i="'+i+'">'+
+      '<input type="text" data-k="nama" value="'+esc(x.nama)+'" placeholder="'+esc(c.ph)+'">'+
+      '<input type="number" min="0" step="1" data-k="kuota" value="'+(x.kuota==null?'':esc(x.kuota))+'" placeholder="Kuota (kosong = tanpa batas)">'+
+      '<span style="font-size:12px;color:#64748B;white-space:nowrap">Terdaftar: <b>'+(used[x.id]||0)+'</b></span>'+
+      '<label class="chk" title="Hilangkan centang untuk menutup tanpa menghapus"><input type="checkbox" data-k="active" '+(x.active?'checked':'')+'>Aktif</label>'+
+      '<span style="white-space:nowrap"><button class="btn btn-sm btn-ghost" data-m="up">↑</button> <button class="btn btn-sm btn-ghost" data-m="down">↓</button> <button class="btn btn-sm btn-danger" data-m="del">✕</button></span>'+
+      '<div class="katsel"><span>Untuk kategori:</span>'+kats.map(function(k){
+        return '<label class="chk"><input type="checkbox" data-kat="'+esc(k.id)+'" '+(x.sel.indexOf(k.id)>=0?'checked':'')+'>'+esc(k.nama)+(k.active?'':' <i>(nonaktif)</i>')+'</label>';
+      }).join('')+'</div></div>';
+  }).join(''):'<p style="color:#64748B;font-size:13px">Belum ada '+c.noun+'. Klik "'+c.add.replace('＋ ','')+'".</p>';
+  Array.prototype.forEach.call($('iList').querySelectorAll('.jrow'),function(row){
+    var i=Number(row.dataset.i);
+    Array.prototype.forEach.call(row.querySelectorAll('[data-k]'),function(el){
+      el.onchange=el.oninput=function(){
+        var k=el.dataset.k;
+        D[i][k]=el.type==='checkbox'?el.checked:el.value;
+        if(k==='active') drawItems(kind);
+      };
+    });
+    Array.prototype.forEach.call(row.querySelectorAll('[data-kat]'),function(el){
+      el.onchange=function(){
+        var id=el.dataset.kat, a=D[i].sel, at=a.indexOf(id);
+        if(el.checked&&at<0) a.push(id);
+        if(!el.checked&&at>=0) a.splice(at,1);
+      };
+    });
+    Array.prototype.forEach.call(row.querySelectorAll('[data-m]'),function(bt){
+      bt.onclick=function(){
+        var m=bt.dataset.m;
+        if(m==='up'&&i>0){var a=D[i];D[i]=D[i-1];D[i-1]=a;}
+        if(m==='down'&&i<D.length-1){var b2=D[i];D[i]=D[i+1];D[i+1]=b2;}
+        if(m==='del'){
+          var u=itemUsed(kind)[D[i].id]||0;
+          if(!confirm('Hapus '+c.noun+' "'+(D[i].nama||'baru')+'"?'+(u?'\n\n'+u+' pendaftar sudah memilihnya. Data mereka tetap tersimpan, tetapi kuotanya tidak dihitung lagi. (Untuk menutup sementara, cukup hilangkan centang Aktif.)':''))) return;
+          D.splice(i,1);
+        }
+        drawItems(kind);
+      };
+    });
+  });
+}
+
+/* ---------- PILIHAN KATEGORI + JENIS/TALKSHOW DI FORM INPUT MANUAL ---------- */
+var PICK={pk:null,ts:null};
+function pickHolder(kind){return '<div id="mPick_'+kind+'"></div>';}
+function pickItemsOf(kind){return kind==='ts'?S.talkshow:S.jenis;}
+function pickRecIds(kind,rec){return rec?(kind==='ts'?rec.talkshow:rec.jenis)||[]:[];}
+function pickInit(kind,rec){
+  PICK[kind]={kat:rec?rec.kategori:'',sel:pickRecIds(kind,rec).slice()};
+  pickDraw(kind,rec);
+  $('mPick_'+kind).onchange=function(ev){
+    var st=PICK[kind], ks=$('mKat_'+kind);
+    var oldKat=st.kat;
+    if(ks) st.kat=ks.value;
+    if(st.kat!==oldKat) st.sel=[];
+    else st.sel=Array.prototype.map.call($('mPick_'+kind).querySelectorAll('input[data-pi]:checked'),function(i){return i.value;});
+    pickDraw(kind,rec);
+    if(st.kat!==oldKat) drawModalFields(kind);
+  };
+}
+function pickDraw(kind,rec){
+  var st=PICK[kind], el=$('mPick_'+kind); if(!el) return;
+  var used=kind==='ts'?tsUsedMap(rec&&rec.nomor):usedMap(rec&&rec.nomor), own=pickRecIds(kind,rec);
+  var kats=S.kategori.filter(function(k){return k.active||k.id===st.kat;});
+  var kobj=S.kategori.filter(function(k){return k.id===st.kat;})[0];
+  var noun=kind==='ts'?'Talkshow':'Jenis Pemeriksaan';
+  var h='';
+  if(kats.length){
+    h+='<div class="field"><label>Kategori pendaftar <span class="req">*</span></label><select id="mKat_'+kind+'"><option value="">— Pilih —</option>'+
+      kats.map(function(k){return '<option value="'+esc(k.id)+'"'+(k.id===st.kat?' selected':'')+'>'+esc(k.nama)+'</option>';}).join('')+'</select></div>';
+  }
+  var all=pickItemsOf(kind).filter(function(x){return x.active||own.indexOf(x.id)>=0;});
+  if(all.length){
+    if(kats.length&&!st.kat){
+      h+='<div class="field"><label>'+noun+'</label><p style="font-size:12px;color:#64748B;margin:0">Pilih kategori dulu.</p></div>';
+    } else {
+      var multi=kobj?kobj[kind==='ts'?'multi_ts':'multi_pk']:true;
+      var avail=all.filter(function(x){return !kobj||!x.sasaran.length||x.sasaran.indexOf(kobj.id)>=0;});
+      h+='<div class="field"><label>'+noun+(avail.length?' <span class="req">*</span>':'')+' <small style="font-weight:400;color:#64748B">'+(avail.length?(multi?'(boleh lebih dari satu)':'(pilih satu)'):'(belum ada untuk kategori ini)')+'</small></label>';
+      h+=avail.map(function(x){
+        var sisa=x.kuota===null?null:x.kuota-(used[x.id]||0);
+        var full=sisa!==null&&sisa<=0&&own.indexOf(x.id)<0;
+        return '<label class="pickrow'+(full?' off':'')+'"><input type="'+(multi?'checkbox':'radio')+'" name="pi_'+kind+'" data-pi value="'+esc(x.id)+'"'+(st.sel.indexOf(x.id)>=0&&!full?' checked':'')+(full?' disabled':'')+'> '+esc(x.nama)+
+          '<span>'+(sisa===null?'tanpa batas':'sisa '+Math.max(0,sisa))+(full?' · penuh':'')+(x.active?'':' · nonaktif')+'</span></label>';
+      }).join('')+'</div>';
+    }
+  }
+  el.innerHTML=h;
+}
+/** Hasil: {kat, ids, changed, err}. changed=false bila sama dengan data tersimpan (edit). */
+function pickCollect(kind,rec){
+  var st=PICK[kind], ks=$('mKat_'+kind);
+  var kat=ks?ks.value:'';
+  var ids=Array.prototype.map.call($('mPick_'+kind).querySelectorAll('input[data-pi]:checked'),function(i){return i.value;});
+  var noun=kind==='ts'?'talkshow':'jenis pemeriksaan';
+  if(ks&&!kat) return {err:'Pilih kategori pendaftar.'};
+  var kobj=S.kategori.filter(function(k){return k.id===kat;})[0];
+  var avail=pickItemsOf(kind).filter(function(x){return x.active&&(!kobj||!x.sasaran.length||x.sasaran.indexOf(kobj.id)>=0);});
+  if(avail.length&&!ids.length) return {err:'Pilih minimal satu '+noun+'.'};
+  var same=rec&&kat===(rec.kategori||'')&&ids.slice().sort().join(',')===pickRecIds(kind,rec).slice().sort().join(',');
+  return {kat:kat,ids:ids,changed:!same};
+}
+
+/* ---------- TALKSHOW: PANEL DASHBOARD ---------- */
+function tsUsedMap(except){
+  var m={};
+  S.tsRecords.forEach(function(r){ if(r.nomor===except) return; (r.talkshow||[]).forEach(function(id){m[id]=(m[id]||0)+1;}); });
+  return m;
+}
+function talkshowSummary(){
+  if(!S.tsRecords.length&&!S.talkshow.some(function(t){return t.active;})) return '';
+  var tot=S.tsRecords.length, hd=S.tsRecords.filter(function(r){return r.hadir;}).length, pct=tot?Math.round(hd*100/tot):0;
+  return '<div class="panel"><h3>Talkshow</h3><div class="stat big" style="margin-bottom:10px"><div><b>'+tot+'</b><span>Pendaftar talkshow</span></div>'+
+    '<div><b style="color:var(--ok)">'+hd+'</b><span>Sudah hadir</span></div><div><b style="color:var(--bad)">'+(tot-hd)+'</b><span>Belum hadir</span></div><div><b>'+pct+'%</b><span>Persentase hadir</span></div></div></div>'+talkshowPanel();
+}
+function talkshowPanel(){
+  var act=S.talkshow.filter(function(t){return t.active;});
+  if(!act.length) return '';
+  var used=tsUsedMap(), hd={};
+  S.tsRecords.forEach(function(r){ if(r.hadir) (r.talkshow||[]).forEach(function(id){hd[id]=(hd[id]||0)+1;}); });
+  return '<div class="panel"><h3>Per Talkshow</h3><div class="jgrid">'+act.map(function(t){
+    var u=used[t.id]||0, pct=t.kuota===null?0:(t.kuota===0?100:Math.min(100,Math.round(u*100/t.kuota)));
+    return '<div class="jcard'+(t.kuota!==null&&u>=t.kuota?' full':'')+'"><b>'+esc(t.nama)+'</b>'+
+      '<small>'+esc(sasaranText(t))+'</small>'+
+      '<small>Terdaftar: <strong>'+u+'</strong>'+(t.kuota!==null?' / '+t.kuota:' (tanpa batas)')+'</small>'+
+      '<small>Hadir: <strong>'+(hd[t.id]||0)+'</strong></small>'+
+      (t.kuota!==null?'<div class="jbar"><i style="width:'+pct+'%"></i></div>':'')+'</div>';
+  }).join('')+'</div></div>';
+}
+
+/* ---------- PENDAFTAR TALKSHOW ---------- */
+function fieldsFor(mode,kid){
+  return S.fields.filter(function(f){
+    if(!f.active) return false;
+    if(f.untuk&&f.untuk!=='semua'&&f.untuk!==mode) return false;
+    if(kid===undefined||!f.sasaran||!f.sasaran.length) return true;   // tanpa kid: semua (untuk tabel/CSV)
+    return !!kid&&f.sasaran.indexOf(kid)>=0;
+  });
+}
+/* isian di modal input/edit: mengikuti kategori yang dipilih, nilai yang sudah diketik dipertahankan */
+function modalKat(kind){var k=$('mKat_'+kind);return k?k.value:((PICK[kind]&&PICK[kind].kat)||'');}
+function drawModalFields(kind,init){
+  var box=$('mFields_'+kind), old=init||{};
+  if(!init) Array.prototype.forEach.call(box.querySelectorAll('[data-fid]'),function(el){
+    if(el.dataset.radio){var c=el.querySelector('input:checked');old[el.dataset.fid]=c?c.value:'';}
+    else old[el.dataset.fid]=el.value;
+  });
+  box.innerHTML=fieldsFor(kind,modalKat(kind)).map(function(f){return fieldHtml(f,old[f.id]||'');}).join('');
+}
+function findRec(v){
+  var a=S.records.filter(function(r){return r.nomor===v;})[0];
+  return a||S.tsRecords.filter(function(r){return r.nomor===v;})[0]||null;
+}
+function tabTsPendaftar(){
+  var fs=fieldsFor('ts'), isAdmin=S.user.role==='admin', show=fs.slice(0,2), q=S.tq.toLowerCase();
+  var rows=S.tsRecords.filter(function(r){
+    if(S.tflt==='hadir'&&!r.hadir) return false;
+    if(S.tflt==='belum'&&r.hadir) return false;
+    if(S.tft&&r.talkshow.indexOf(S.tft)<0) return false;
+    if(!q) return true;
+    return r.nomor.toLowerCase().indexOf(q)>=0 || Object.keys(r.data).some(function(k){return String(r.data[k]).toLowerCase().indexOf(q)>=0;});
+  });
+  var today=wibToday(), nHadir=S.tsRecords.filter(function(r){return r.hadir;}).length;
+  var h='<div class="stat"><div><b>'+S.tsRecords.length+'</b><span>Total pendaftar talkshow</span></div>'+
+    '<div><b>'+S.tsRecords.filter(function(r){return r.timestamp.slice(0,10)===today;}).length+'</b><span>Hari ini</span></div>'+
+    '<div><b>'+S.tsRecords.filter(function(r){return r.sumber==='manual';}).length+'</b><span>Input manual</span></div>'+
+    '<div><b style="color:var(--ok)">'+nHadir+'</b><span>Sudah hadir</span></div></div>';
+  h+='<div class="panel" style="padding:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><b>Check-in cepat</b>'+
+     '<input type="text" id="ciBox" placeholder="Ketik nomor, mis. 12 atau TS-0012" style="max-width:260px" autocapitalize="characters">'+
+     '<button class="btn btn-sm" id="btnCi" style="background:var(--ok)">✔ Tandai Hadir</button>'+
+     '<button class="btn btn-sm btn-accent" id="btnScan">📷 Scan QR</button></div>';
+  h+='<div class="toolbar"><input type="text" id="qBox" placeholder="Cari nomor / nama…" value="'+esc(S.tq)+'">'+
+     '<select id="fltBox" style="max-width:160px"><option value="all">Semua</option><option value="hadir">Sudah hadir</option><option value="belum">Belum hadir</option></select>'+
+     (S.talkshow.length?'<select id="ftBox" style="max-width:220px"><option value="">Semua talkshow</option>'+S.talkshow.map(function(t){return '<option value="'+esc(t.id)+'">'+esc(t.nama)+'</option>';}).join('')+'</select>':'')+
+     '<span class="sp"></span><button class="btn btn-sm btn-accent" id="btnPrintSel">🖨️ Cetak Terpilih (0)</button>'+
+     '<button class="btn btn-sm btn-accent" id="btnPrintAll">🖨️ Cetak Semua</button>'+
+     '<button class="btn btn-sm" id="btnAdd">＋ Input Manual</button>'+
+     '<button class="btn btn-sm btn-ghost" id="btnCsv">⬇ Ekspor CSV</button>'+
+     '<button class="btn btn-sm btn-ghost" id="btnRef">⟳ Muat Ulang</button></div>';
+  h+='<div class="tablewrap"><table class="t"><thead><tr><th><input type="checkbox" id="chkAll"></th><th>Nomor</th><th>Waktu</th>'+
+     show.map(function(f){return '<th>'+esc(f.label)+'</th>';}).join('')+'<th>Kategori</th><th>Talkshow</th><th>Hadir</th><th>Sumber</th><th></th></tr></thead><tbody>';
+  if(!rows.length) h+='<tr><td colspan="'+(show.length+8)+'" style="text-align:center;color:#64748B;padding:30px">Belum ada data.</td></tr>';
+  rows.forEach(function(r){
+    h+='<tr><td><input type="checkbox" class="rowchk" data-n="'+esc(r.nomor)+'"'+(S.tsel[r.nomor]?' checked':'')+'></td><td><b>'+esc(r.nomor)+'</b></td><td>'+esc(r.timestamp)+'</td>'+
+      show.map(function(f){return '<td>'+esc(r.data[f.id]||'-')+'</td>';}).join('')+
+      '<td>'+esc(r.kategori_nama||'-')+'</td><td>'+esc(r.talkshow_nama||'-')+'</td>'+
+      '<td>'+(r.hadir
+        ?'<button class="btn btn-sm" style="background:var(--ok)" data-act="unhadir" data-n="'+esc(r.nomor)+'" title="Klik untuk membatalkan">✔ '+esc((r.waktu_hadir||'').slice(11,16))+'</button>'
+        :'<button class="btn btn-sm btn-ghost" data-act="hadir" data-n="'+esc(r.nomor)+'">Tandai hadir</button>')+'</td>'+
+      '<td><span class="badge '+(r.sumber==='manual'?'manual':'')+'">'+esc(r.sumber)+(r.dibuat_oleh?' · '+esc(r.dibuat_oleh):'')+'</span></td>'+
+      '<td style="white-space:nowrap"><button class="btn btn-sm" data-act="print" data-n="'+esc(r.nomor)+'">🖨️ Kartu</button>'+
+      (isAdmin?' <button class="btn btn-sm btn-ghost" data-act="edit" data-n="'+esc(r.nomor)+'">Edit</button> <button class="btn btn-sm btn-danger" data-act="del" data-n="'+esc(r.nomor)+'">Hapus</button>':'')+
+      '</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  $('main').innerHTML=h;
+  var qb=$('qBox'); qb.oninput=function(){S.tq=qb.value;var p=qb.selectionStart;tabTsPendaftar();var n=$('qBox');n.focus();n.setSelectionRange(p,p);};
+  $('btnAdd').onclick=function(){openTsForm(null);};
+  $('btnCsv').onclick=exportTsCsv;
+  $('fltBox').value=S.tflt; $('fltBox').onchange=function(){S.tflt=this.value;tabTsPendaftar();};
+  var ft=$('ftBox'); if(ft){ft.value=S.tft;ft.onchange=function(){S.tft=this.value;tabTsPendaftar();};}
+  $('btnCi').onclick=quickCheckin; $('btnScan').onclick=openScanner;
+  $('ciBox').onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();quickCheckin();}};
+  function syncSel(){
+    $('btnPrintSel').textContent='🖨️ Cetak Terpilih ('+Object.keys(S.tsel).length+')';
+    $('chkAll').checked=rows.length>0&&rows.every(function(r){return S.tsel[r.nomor];});
+  }
+  syncSel();
+  $('chkAll').onchange=function(){
+    var on=this.checked;
+    rows.forEach(function(r){ if(on) S.tsel[r.nomor]=true; else delete S.tsel[r.nomor]; });
+    Array.prototype.forEach.call($('main').querySelectorAll('.rowchk'),function(c){c.checked=on;});
+    syncSel();
+  };
+  Array.prototype.forEach.call($('main').querySelectorAll('.rowchk'),function(c){
+    c.onchange=function(){ if(c.checked) S.tsel[c.dataset.n]=true; else delete S.tsel[c.dataset.n]; syncSel(); };
+  });
+  $('btnPrintSel').onclick=function(){
+    var recs=S.tsRecords.filter(function(r){return S.tsel[r.nomor];}).reverse();
+    if(!recs.length){toast('Centang pendaftar yang ingin dicetak.','err');return;}
+    printCards(S.cfg,S.fields,recs);
+  };
+  $('btnPrintAll').onclick=function(){
+    if(!rows.length){toast('Tidak ada data untuk dicetak.','err');return;}
+    if(!confirm('Cetak '+rows.length+' kartu'+(S.tq?' (sesuai hasil pencarian)':'')+'?')) return;
+    printCards(S.cfg,S.fields,rows.slice().reverse());
+  };
+  $('btnRef').onclick=function(){boot().then(function(){toast('Data diperbarui','ok');}).catch(function(e){toast(e.message,'err');});};
+  Array.prototype.forEach.call($('main').querySelectorAll('button[data-act]'),function(b){
+    b.onclick=function(){
+      var rec=S.tsRecords.filter(function(r){return r.nomor===b.dataset.n;})[0];
+      if(b.dataset.act==='print') printCard(S.cfg,S.fields,rec);
+      if(b.dataset.act==='hadir'||b.dataset.act==='unhadir') toggleHadir(rec,b.dataset.act==='hadir');
+      if(b.dataset.act==='edit') openTsForm(rec);
+      if(b.dataset.act==='del'){
+        if(!confirm('Hapus pendaftar '+rec.nomor+'?')) return;
+        api('deleteTsPendaftar',S.token,rec.nomor).then(function(){
+          S.tsRecords=S.tsRecords.filter(function(r){return r.nomor!==rec.nomor;});tabTsPendaftar();toast('Dihapus','ok');
+        }).catch(function(e){toast(e.message,'err');});
+      }
+    };
+  });
+}
+
+function openTsForm(rec){
+  if(!S.talkshow.some(function(t){return t.active;})&&!rec){toast('Belum ada talkshow aktif. Tambahkan di menu Talkshow & Kuota.','err');return;}
+  var body=pickHolder('ts')+'<div id="mFields_ts"></div>';
+  openModal(rec?'Edit '+rec.nomor:'Input Pendaftar Talkshow',body,function(){
+    var fs=fieldsFor('ts',modalKat('ts'));
+    var data=collectForm($('mBody'),fs);
+    var miss=missingRequired(fs,data);
+    if(miss){toast('"'+miss+'" wajib diisi.','err');return;}
+    var pk=pickCollect('ts',rec);
+    if(pk.err){toast(pk.err,'err');return;}
+    if(!pk.ids.length){toast('Pilih minimal satu talkshow.','err');return;}
+    if(rec){
+      return api('updateTsPendaftar',S.token,rec.nomor,data,pk.changed?pk.kat:null,pk.changed?pk.ids:null).then(function(r){
+        rec.data=data;
+        if(r&&pk.changed){rec.kategori=r.kategori;rec.kategori_nama=r.kategori_nama;rec.talkshow=r.talkshow;rec.talkshow_list=r.talkshow_list;rec.talkshow_nama=r.talkshow_nama;}
+        closeModal();tabTsPendaftar();toast('Tersimpan','ok');
+      });
+    }
+    return api('addTsPendaftar',S.token,data,pk.kat,pk.ids).then(function(nr){
+      if(nr&&nr.duplicate){
+        alert((nr.label||'Nama')+' tersebut sudah terdaftar di talkshow dengan nomor '+nr.nomor+(nr.talkshow_nama?' ('+nr.talkshow_nama+')':'')+'.');
+        S.tq=nr.nomor;S.tflt='all';S.tft='';closeModal();tabTsPendaftar();return;
+      }
+      S.tsRecords.unshift(nr);closeModal();tabTsPendaftar();toast('Tersimpan: '+nr.nomor,'ok');
+      if(confirm('Cetak kartu untuk '+nr.nomor+' sekarang?')) printCard(S.cfg,S.fields,nr);
+    });
+  });
+  pickInit('ts',rec);
+  drawModalFields('ts',rec?rec.data:{});
+}
+function exportTsCsv(){
+  var fs=fieldsFor('ts');
+  var head=['Nomor','Waktu','Sumber','Dibuat oleh','Kategori','Talkshow','Hadir','Waktu Hadir'].concat(fs.map(function(f){return f.label;}));
+  var q=function(v){return '"'+String(v==null?'':v).replace(/"/g,'""')+'"';};
+  var lines=[head.map(q).join(',')];
+  S.tsRecords.forEach(function(r){
+    lines.push([r.nomor,r.timestamp,r.sumber,r.dibuat_oleh,r.kategori_nama||'',r.talkshow_nama||'',r.hadir?'Ya':'Tidak',r.waktu_hadir||''].concat(fs.map(function(f){return r.data[f.id]||'';})).map(q).join(','));
+  });
+  var blob=new Blob(['﻿'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+  var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='pendaftar-talkshow-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+}
+
+
+/* ---------- CETAK DAFTAR HADIR (ADMIN) ---------- */
+var DH={kind:'pk',item:'',show:'all',ttd:true,sort:'nomor',sub:''};
+function dhData(){
+  var ts=DH.kind==='ts', src=ts?S.tsRecords:S.records, fs=fieldsFor(ts?'ts':'pk');
+  var rows=src.filter(function(r){
+    if(DH.item&&(ts?r.talkshow:r.jenis).indexOf(DH.item)<0) return false;
+    if(DH.show==='hadir'&&!r.hadir) return false;
+    if(DH.show==='belum'&&r.hadir) return false;
+    return true;
+  }).slice();
+  var f0=fs[0];
+  rows.sort(function(a,b){
+    if(DH.sort==='nama'&&f0){
+      var x=String(a.data[f0.id]||'').toLowerCase(), y=String(b.data[f0.id]||'').toLowerCase();
+      if(x!==y) return x<y?-1:1;
+    }
+    return a.nomor<b.nomor?-1:(a.nomor>b.nomor?1:0);
+  });
+  return {rows:rows,fs:fs,ts:ts,all:src.filter(function(r){return !DH.item||(ts?r.talkshow:r.jenis).indexOf(DH.item)>=0;})};
+}
+function dhHtml(){
+  var d=dhData(), c=S.cfg, ts=d.ts, cols=d.fs.slice(0,2);
+  var list=ts?S.talkshow:S.jenis, itemNama='';
+  if(DH.item){var it=list.filter(function(x){return x.id===DH.item;})[0]; itemNama=it?it.nama:'';}
+  var title=ts?'DAFTAR HADIR TALKSHOW':'DAFTAR HADIR PEMERIKSAAN KESEHATAN';
+  var showLbl={all:'Semua pendaftar',hadir:'Peserta yang sudah hadir',belum:'Peserta yang belum hadir'}[DH.show];
+  var hadirAll=d.all.filter(function(r){return r.hadir;}).length;
+  var now=new Date(Date.now()+7*3600*1000).toISOString().slice(0,16).replace('T',' ');
+  var h='<div class="dh"><div class="dh-head">'+(c.logoUrl?'<img src="'+esc(c.logoUrl)+'">':'')+
+    '<div><h1>'+esc(c.eventName)+'</h1><p>'+esc(c.namaInstansi||'')+'</p></div></div>'+
+    '<div class="dh-title"><b>'+title+'</b>'+(itemNama?'<span>'+esc(itemNama)+'</span>':'<span>Semua '+(ts?'talkshow':'jenis pemeriksaan')+'</span>')+'</div>'+
+    '<div class="dh-meta">'+(c.tanggal?'<span>Hari/Tanggal: <b>'+esc(c.tanggal)+'</b></span>':'')+(c.lokasi?'<span>Lokasi: <b>'+esc(c.lokasi)+'</b></span>':'')+
+    (DH.sub?'<span>'+esc(DH.sub)+'</span>':'')+
+    '<span>Tampilan: <b>'+showLbl+'</b></span><span>Jumlah pendaftar: <b>'+d.all.length+'</b> · Hadir: <b>'+hadirAll+'</b> · Belum: <b>'+(d.all.length-hadirAll)+'</b></span></div>'+
+    '<table><thead><tr><th style="width:9mm">No</th><th>Nomor</th>'+cols.map(function(f){return '<th>'+esc(f.label)+'</th>';}).join('')+
+    '<th>Kategori</th><th>'+(ts?'Talkshow':'Pemeriksaan')+'</th>'+'<th>Hadir</th>'+(DH.ttd?'<th>Tanda Tangan</th>':'')+'</tr></thead><tbody>';
+  if(!d.rows.length) h+='<tr><td colspan="'+(cols.length+5+(DH.ttd?1:0))+'" style="text-align:center;padding:14px">Tidak ada data.</td></tr>';
+  d.rows.forEach(function(r,i){
+    h+='<tr><td class="c">'+(i+1)+'</td><td class="c"><b>'+esc(r.nomor)+'</b></td>'+
+      cols.map(function(f){return '<td>'+esc(r.data[f.id]||'-')+'</td>';}).join('')+
+      '<td class="c">'+esc(r.kategori_nama||'-')+'</td><td>'+esc((ts?r.talkshow_nama:r.jenis_nama)||'-')+'</td>'+
+      '<td class="c">'+(r.hadir?'✔ '+esc((r.waktu_hadir||'').slice(11,16)):'')+'</td>'+(DH.ttd?'<td class="ttd"></td>':'')+'</tr>';
+  });
+  h+='</tbody></table><div class="dh-foot"><div>Dicetak: '+now+' WIB<br>oleh '+esc(S.user.nama)+'</div>'+
+    '<div class="sign">Penanggung jawab,<i></i><u>(............................................)</u></div></div></div>';
+  return h;
+}
+function tabDaftarHadir(){
+  var ts=DH.kind==='ts', list=ts?S.talkshow:S.jenis;
+  if(DH.item&&!list.some(function(x){return x.id===DH.item;})) DH.item='';
+  var h='<div class="panel"><h3>Cetak Daftar Hadir</h3>'+
+    '<p style="font-size:13px;color:#64748B;margin-top:0">Pilih kegiatan, lalu cetak daftar hadir (bisa langsung disimpan sebagai PDF lewat dialog cetak). Kolom tanda tangan bisa dinyalakan untuk lembar yang diisi langsung di lokasi.</p>'+
+    '<div class="grid2">'+
+    '<div class="field"><label>Kegiatan</label><select id="dhKind"><option value="pk">Pemeriksaan Kesehatan</option><option value="ts">Talkshow</option></select></div>'+
+    '<div class="field"><label>'+(ts?'Talkshow':'Jenis pemeriksaan')+'</label><select id="dhItem"><option value="">Semua</option>'+list.map(function(x){return '<option value="'+esc(x.id)+'">'+esc(x.nama)+'</option>';}).join('')+'</select></div>'+
+    '<div class="field"><label>Yang dicetak</label><select id="dhShow"><option value="all">Semua pendaftar</option><option value="hadir">Hanya yang sudah hadir</option><option value="belum">Hanya yang belum hadir</option></select></div>'+
+    '<div class="field"><label>Urutan</label><select id="dhSort"><option value="nomor">Nomor pendaftaran</option><option value="nama">Nama (A-Z)</option></select></div>'+
+    '<div class="field" style="grid-column:1/-1"><label>Keterangan tambahan (opsional)</label><input type="text" id="dhSub" value="'+esc(DH.sub)+'" placeholder="mis. Sesi 1 / Meja 2"></div></div>'+
+    '<label style="display:flex;gap:8px;align-items:center;margin:4px 0 14px"><input type="checkbox" id="dhTtd" '+(DH.ttd?'checked':'')+'> Sertakan kolom tanda tangan</label>'+
+    '<button class="btn" id="dhPrint">🖨️ Cetak Daftar Hadir</button></div>'+
+    '<div class="panel"><h3>Pratinjau</h3><div class="tablewrap" style="background:#fff;padding:14px;border:1px solid var(--line);border-radius:12px" id="dhPrev"></div></div>';
+  $('main').innerHTML=h;
+  $('dhKind').value=DH.kind; $('dhItem').value=DH.item; $('dhShow').value=DH.show; $('dhSort').value=DH.sort;
+  function draw(){ $('dhPrev').innerHTML=dhHtml(); }
+  $('dhKind').onchange=function(){DH.kind=this.value;DH.item='';tabDaftarHadir();};
+  $('dhItem').onchange=function(){DH.item=this.value;draw();};
+  $('dhShow').onchange=function(){DH.show=this.value;draw();};
+  $('dhSort').onchange=function(){DH.sort=this.value;draw();};
+  $('dhTtd').onchange=function(){DH.ttd=this.checked;draw();};
+  $('dhSub').oninput=function(){DH.sub=this.value;draw();};
+  $('dhPrint').onclick=function(){
+    var b=$('dhPrint'); b.disabled=true;
+    // muat data terbaru dulu supaya status hadir yang dicetak mutakhir
+    api('adminBootstrap',S.token).then(function(bt){
+      S.records=bt.records;S.tsRecords=bt.tsRecords||S.tsRecords;S.kategori=bt.kategori||S.kategori;S.jenis=bt.jenis||S.jenis;S.talkshow=bt.talkshow||S.talkshow;
+    }).catch(function(){}).then(function(){
+      b.disabled=false;
+      if(!dhData().rows.length){toast('Tidak ada data untuk dicetak.','err');return;}
+      draw(); printHtml(dhHtml());
+    });
+  };
+  draw();
+}
+
+/* ---------- TAB TAMPILAN ---------- */
+function tabTampilan(){
+  var c=S.cfg;
+  function inp(k,label,type,ph){return '<div class="field"><label>'+label+'</label><input type="'+(type||'text')+'" id="s_'+k+'" value="'+esc(c[k]||'')+'" placeholder="'+esc(ph||'')+'"></div>';}
+  var h='<div class="panel"><h3>Teks Halaman Utama</h3><div class="grid2">'+
+    inp('eventName','Nama Kegiatan','text')+inp('namaInstansi','Nama Instansi','text')+
+    '<div class="field" style="grid-column:1/-1"><label>Sub-judul</label><input type="text" id="s_subtitle" value="'+esc(c.subtitle)+'"></div>'+
+    inp('tanggal','Tanggal Kegiatan','text','mis. Sabtu, 15 November 2026')+inp('lokasi','Lokasi','text','mis. Aula SMP Santo Mikael')+
+    inp('prefix','Awalan Nomor Pemeriksaan','text','PK')+inp('prefixTalkshow','Awalan Nomor Talkshow','text','TS')+inp('catatanKartu','Catatan di Kartu Pemeriksaan','text')+inp('catatanKartuTalkshow','Catatan di Kartu Talkshow','text')+
+    '</div></div>';
+  h+='<div class="panel"><h3>Status Pendaftaran</h3><label style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><input type="checkbox" id="s_open" '+(String(c.registrationOpen)==='true'?'checked':'')+'> Pendaftaran online dibuka</label>'+
+    inp('closedMessage','Pesan saat ditutup','text')+'</div>';
+  h+='<div class="panel"><h3>Warna</h3><div class="grid2"><div class="field"><label>Warna Utama</label><input type="color" id="s_warnaUtama" value="'+esc(c.warnaUtama)+'" style="height:44px"></div>'+
+    '<div class="field"><label>Warna Aksen (tombol)</label><input type="color" id="s_warnaAksen" value="'+esc(c.warnaAksen)+'" style="height:44px"></div></div></div>';
+  h+='<div class="panel"><h3>Video Latar (opsional)</h3><div class="field"><label>URL video MP4 (https://…)</label>'+
+    '<input type="url" id="s_videoUrl" value="'+esc(c.videoUrl)+'" placeholder="https://…/video.mp4"></div>'+
+    '<p class="muted" style="font-size:12px;color:#64748B;margin:0">Video (mis. hasil Veo 3) diunggah ke hosting video/CDN lalu tempel URL langsung ke file .mp4. Gunakan klip pendek &lt; 10 MB agar cepat dimuat.</p></div>';
+  h+='<div class="panel"><h3>Favicon (ikon tab browser)</h3><div class="field"><label>URL favicon (opsional)</label>'+
+    '<input type="url" id="s_faviconUrl" value="'+esc(c.faviconUrl||'')+'" placeholder="https://…/favicon.png"></div>'+
+    '<p class="muted" style="font-size:12px;color:#64748B;margin:0">Kosongkan untuk memakai logo yang diupload. Jika ikon tab belum berubah, tempel URL langsung ke file PNG persegi (mis. dari GitHub atau hosting gambar), lalu muat ulang halaman.</p></div>';
+  h+='<button class="btn" id="btnSaveSet">Simpan Pengaturan</button>';
+  h+='<div class="grid2" style="margin-top:20px">'+imgPanel('logo','Logo',c.logoUrl)+imgPanel('hero','Gambar Ilustrasi Halaman Utama',c.heroUrl)+'</div>';
+  $('main').innerHTML=h;
+
+  $('btnSaveSet').onclick=function(){
+    var b=$('btnSaveSet'); b.disabled=true;
+    var o={};
+    ['eventName','namaInstansi','subtitle','tanggal','lokasi','prefix','prefixTalkshow','catatanKartu','catatanKartuTalkshow','closedMessage','warnaUtama','warnaAksen','videoUrl','faviconUrl'].forEach(function(k){o[k]=$('s_'+k).value;});
+    o.registrationOpen=$('s_open').checked?'true':'false';
+    api('saveSettings',S.token,o).then(function(s){
+      S.cfg=s;applyTheme(s);$('tTitle').textContent=s.eventName+' — Admin';toast('Pengaturan tersimpan','ok');
+    }).catch(function(e){toast(e.message,'err');}).then(function(){b.disabled=false;});
+  };
+  ['logo','hero'].forEach(function(kind){
+    $('f_'+kind).onchange=function(ev){
+      var file=ev.target.files[0]; if(!file) return;
+      toast('Mengunggah…');
+      compressImage(file,kind==='logo'?600:1600,kind==='logo'?'image/png':'image/jpeg').then(function(r){
+        return api('uploadImage',S.token,kind,r.mime,r.b64);
+      }).then(function(url){
+        S.cfg[kind==='logo'?'logoUrl':'heroUrl']=url;
+        if(kind==='logo'){$('tLogo').src=url;$('tLogo').hidden=false;}
+        toast('Gambar tersimpan','ok');tabTampilan();
+      }).catch(function(e){toast(e.message,'err');});
+    };
+    var rm=$('rm_'+kind); if(rm) rm.onclick=function(){
+      api('clearImage',S.token,kind).then(function(){
+        S.cfg[kind==='logo'?'logoUrl':'heroUrl']='';
+        if(kind==='logo') $('tLogo').hidden=true;
+        tabTampilan();
+      }).catch(function(e){toast(e.message,'err');});
+    };
+  });
+}
+function imgPanel(kind,title,url){
+  return '<div class="panel"><h3>'+title+'</h3><div class="imgprev">'+(url?'<img src="'+esc(url)+'">':'<span style="color:#94A3B8">Belum ada gambar</span>')+'</div>'+
+    '<input type="file" id="f_'+kind+'" accept="image/png,image/jpeg,image/webp">'+
+    (url?' <button class="btn btn-sm btn-ghost" id="rm_'+kind+'" style="margin-top:8px">Hapus</button>':'')+'</div>';
+}
+function compressImage(file,maxPx,mime){
+  return new Promise(function(res,rej){
+    var img=new Image(), url=URL.createObjectURL(file);
+    img.onload=function(){
+      var sc=Math.min(1,maxPx/Math.max(img.width,img.height));
+      var cv=document.createElement('canvas'); cv.width=Math.round(img.width*sc); cv.height=Math.round(img.height*sc);
+      var ctx=cv.getContext('2d');
+      if(mime==='image/jpeg'){ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);}
+      ctx.drawImage(img,0,0,cv.width,cv.height);
+      var d=cv.toDataURL(mime,0.85);
+      URL.revokeObjectURL(url);
+      res({mime:mime,b64:d.split(',')[1]});
+    };
+    img.onerror=function(){rej(new Error('File gambar tidak bisa dibaca.'));};
+    img.src=url;
+  });
+}
+
+/* ---------- TAB FORMULIR ---------- */
+var FDRAFT=null;
+function tabFormulir(){
+  if(!FDRAFT){
+    FDRAFT=JSON.parse(JSON.stringify(S.fields));
+    FDRAFT.forEach(function(f){f.sel=(f.sasaran&&f.sasaran.length)?f.sasaran.slice():katIds();});
+  }
+  var h='<div class="panel"><h3>Data yang diminta saat pendaftaran</h3>'+
+    '<p style="font-size:13px;color:#64748B;margin-top:0">Atur label, tipe, wajib/tidak, dan urutan. Centang <b>Unik</b> pada isian yang tidak boleh sama antar pendaftar (mis. Nama Lengkap): pendaftar yang namanya sudah ada akan diberi tahu nomor registrasinya. Untuk tipe Dropdown/Radio isi pilihan dipisah koma. Di bawah tiap isian, centang <b>Ditanyakan ke kategori</b> (mis. hanya Anak atau hanya Orang Tua) agar isian itu hanya muncul untuk kategori tersebut. Field yang dinonaktifkan tidak tampil di formulir, tetapi data lama tetap tersimpan.</p><div id="fList"></div>'+
+    '<div style="display:flex;gap:10px;margin-top:12px"><button class="btn btn-ghost btn-sm" id="fAdd">＋ Tambah Field</button><button class="btn" id="fSave">Simpan Formulir</button></div></div>';
+  $('main').innerHTML=h;
+  drawFields();
+  $('fAdd').onclick=function(){
+    FDRAFT.push({id:'f'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),label:'',type:'text',required:false,options:'',active:true,unique:false,untuk:'semua',sel:katIds()});
+    drawFields();
+  };
+  $('fSave').onclick=function(){
+    var b=$('fSave'); b.disabled=true;
+    api('saveFields',S.token,FDRAFT.map(function(f){var o={};for(var k in f)o[k]=f[k];o.sasaran=f.sel;delete o.sel;return o;})).then(function(f){S.fields=f;FDRAFT=null;toast('Formulir tersimpan','ok');tabFormulir();})
+      .catch(function(e){toast(e.message,'err');}).then(function(){b.disabled=false;});
+  };
+}
+function drawFields(){
+  $('fList').innerHTML=FDRAFT.map(function(f,i){
+    return '<div class="frow '+(f.active?'':'inactive')+'" data-i="'+i+'">'+
+      '<input type="text" data-k="label" value="'+esc(f.label)+'" placeholder="Label field">'+
+      '<select data-k="type">'+TYPES.map(function(t){return '<option value="'+t[0]+'"'+(f.type===t[0]?' selected':'')+'>'+t[1]+'</option>';}).join('')+'</select>'+
+      '<input type="text" data-k="options" value="'+esc(f.options)+'" placeholder="Pilihan (a,b,c)" '+((f.type==='select'||f.type==='radio')?'':'disabled')+'>'+
+      '<select data-k="untuk" title="Isian ini dipakai untuk kegiatan apa"><option value="semua"'+((f.untuk||'semua')==='semua'?' selected':'')+'>Semua kegiatan</option><option value="pk"'+(f.untuk==='pk'?' selected':'')+'>Hanya pemeriksaan</option><option value="ts"'+(f.untuk==='ts'?' selected':'')+'>Hanya talkshow</option></select>'+
+      '<label class="chk"><input type="checkbox" data-k="required" '+(f.required?'checked':'')+'>Wajib</label>'+
+      '<label class="chk"><input type="checkbox" data-k="active" '+(f.active?'checked':'')+'>Aktif</label>'+
+      '<label class="chk" title="Tidak boleh ada dua pendaftar dengan isian yang sama"><input type="checkbox" data-k="unique" '+(f.unique?'checked':'')+'>Unik</label>'+
+      '<span style="white-space:nowrap"><button class="btn btn-sm btn-ghost" data-m="up">↑</button> <button class="btn btn-sm btn-ghost" data-m="down">↓</button> <button class="btn btn-sm btn-danger" data-m="del">✕</button></span>'+
+      (S.kategori.length?'<div class="katsel"><span>Ditanyakan ke kategori:</span>'+S.kategori.map(function(k){
+        return '<label class="chk"><input type="checkbox" data-kat="'+esc(k.id)+'" '+(f.sel.indexOf(k.id)>=0?'checked':'')+'>'+esc(k.nama)+(k.active?'':' <i>(nonaktif)</i>')+'</label>';
+      }).join('')+'</div>':'')+'</div>';
+  }).join('');
+  Array.prototype.forEach.call($('fList').querySelectorAll('.frow'),function(row){
+    var i=Number(row.dataset.i);
+    Array.prototype.forEach.call(row.querySelectorAll('[data-k]'),function(el){
+      el.onchange=el.oninput=function(){
+        var k=el.dataset.k;
+        FDRAFT[i][k]=el.type==='checkbox'?el.checked:el.value;
+        if(k==='type'||k==='active') drawFields();
+      };
+    });
+    Array.prototype.forEach.call(row.querySelectorAll('[data-kat]'),function(el){
+      el.onchange=function(){
+        var a=FDRAFT[i].sel, id=el.dataset.kat, at=a.indexOf(id);
+        if(el.checked&&at<0) a.push(id);
+        if(!el.checked&&at>=0) a.splice(at,1);
+      };
+    });
+    Array.prototype.forEach.call(row.querySelectorAll('[data-m]'),function(bt){
+      bt.onclick=function(){
+        var m=bt.dataset.m;
+        if(m==='up'&&i>0){var t=FDRAFT[i];FDRAFT[i]=FDRAFT[i-1];FDRAFT[i-1]=t;}
+        if(m==='down'&&i<FDRAFT.length-1){var t2=FDRAFT[i];FDRAFT[i]=FDRAFT[i+1];FDRAFT[i+1]=t2;}
+        if(m==='del'){ if(!confirm('Hapus field "'+(FDRAFT[i].label||'baru')+'"? Data lama field ini tidak akan tampil lagi.')) return; FDRAFT.splice(i,1); }
+        drawFields();
+      };
+    });
+  });
+}
+
+/* ---------- TAB USER ---------- */
+function tabUser(){
+  var h='<div class="toolbar"><h3 style="flex:1">Petugas &amp; User</h3><button class="btn btn-sm" id="uAdd">＋ Tambah User</button></div>'+
+    '<p style="font-size:13px;color:#64748B;margin-top:-6px">Petugas dapat input manual pendaftar dan mencetak kartu. Admin memiliki akses penuh.</p>'+
+    '<div class="tablewrap"><table class="t"><thead><tr><th>Username</th><th>Nama</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>'+
+    S.users.map(function(u){
+      return '<tr><td><b>'+esc(u.username)+'</b></td><td>'+esc(u.nama)+'</td><td><span class="badge">'+esc(u.role)+'</span></td>'+
+        '<td>'+(u.active?'<span class="badge" style="background:#DCFCE7;color:#166534">aktif</span>':'<span class="badge off">nonaktif</span>')+'</td>'+
+        '<td style="white-space:nowrap"><button class="btn btn-sm btn-ghost" data-e="'+esc(u.username)+'">Edit</button> '+
+        (u.username!==S.user.username?'<button class="btn btn-sm btn-danger" data-d="'+esc(u.username)+'">Hapus</button>':'')+'</td></tr>';
+    }).join('')+'</tbody></table></div>';
+  $('main').innerHTML=h;
+  $('uAdd').onclick=function(){userForm(null);};
+  Array.prototype.forEach.call($('main').querySelectorAll('[data-e]'),function(b){
+    b.onclick=function(){userForm(S.users.filter(function(u){return u.username===b.dataset.e;})[0]);};
+  });
+  Array.prototype.forEach.call($('main').querySelectorAll('[data-d]'),function(b){
+    b.onclick=function(){
+      if(!confirm('Hapus user '+b.dataset.d+'?')) return;
+      api('deleteUser',S.token,b.dataset.d).then(function(l){S.users=l;tabUser();toast('User dihapus','ok');}).catch(function(e){toast(e.message,'err');});
+    };
+  });
+}
+function userForm(u){
+  var body='<div class="field"><label>Username</label><input type="text" id="uU" value="'+esc(u?u.username:'')+'" '+(u?'disabled':'')+' autocapitalize="off"></div>'+
+    '<div class="field"><label>Nama</label><input type="text" id="uN" value="'+esc(u?u.nama:'')+'"></div>'+
+    '<div class="field"><label>Role</label><select id="uR"><option value="petugas"'+(u&&u.role==='petugas'?' selected':'')+'>Petugas (input manual &amp; cetak kartu)</option><option value="admin"'+(u&&u.role==='admin'?' selected':'')+'>Admin (akses penuh)</option></select></div>'+
+    '<div class="field"><label>Password '+(u?'(kosongkan jika tidak diganti)':'')+'</label><input type="password" id="uP" autocomplete="new-password"></div>'+
+    '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="uA" '+(!u||u.active?'checked':'')+'> Akun aktif</label>';
+  openModal(u?'Edit User':'Tambah User',body,function(){
+    return api('saveUser',S.token,{username:$('uU').value,nama:$('uN').value,role:$('uR').value,password:$('uP').value,active:$('uA').checked}).then(function(l){
+      S.users=l;closeModal();tabUser();toast('User tersimpan','ok');
+    });
+  });
+}
+
+/* ---------- TAB AKUN ---------- */
+function tabAkun(){
+  $('main').innerHTML='<div class="panel" style="max-width:420px"><h3>Ganti Password</h3>'+
+    '<div class="field"><label>Password lama</label><input type="password" id="pOld"></div>'+
+    '<div class="field"><label>Password baru (min. 6 karakter)</label><input type="password" id="pNew"></div>'+
+    '<button class="btn" id="pSave">Ganti Password</button></div>';
+  $('pSave').onclick=function(){
+    api('changeMyPassword',S.token,$('pOld').value,$('pNew').value).then(function(){
+      $('pOld').value='';$('pNew').value='';toast('Password diganti','ok');
+    }).catch(function(e){toast(e.message,'err');});
+  };
+}
+
+/* ---------- START ---------- */
+(function(){
+  var tk=null; try{tk=sessionStorage.getItem('tk');}catch(x){}
+  if(tk){S.token=tk;boot().catch(function(){try{sessionStorage.removeItem('tk');}catch(x){}});}
+  api('getPublicConfig').then(function(p){applyTheme(p.settings);}).catch(function(){});
+})();
+</script>
+</body>
+</html>

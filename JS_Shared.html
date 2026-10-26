@@ -1,0 +1,120 @@
+<script>
+function $(id){return document.getElementById(id);}
+
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function api(fn){
+  var args=Array.prototype.slice.call(arguments,1);
+  return new Promise(function(res,rej){
+    var r=google.script.run
+      .withSuccessHandler(res)
+      .withFailureHandler(function(e){rej(new Error((e&&e.message)||String(e)));});
+    r[fn].apply(r,args);
+  });
+}
+
+var _toastT;
+function toast(msg,type){
+  var t=$('toast'); if(!t) return;
+  t.textContent=msg; t.className='show '+(type||'');
+  clearTimeout(_toastT);
+  _toastT=setTimeout(function(){t.className='';},3800);
+}
+
+function applyTheme(cfg){
+  var r=document.documentElement.style;
+  if(cfg.warnaUtama) r.setProperty('--primary',cfg.warnaUtama);
+  if(cfg.warnaAksen) r.setProperty('--accent',cfg.warnaAksen);
+}
+
+function optList(f){
+  return String(f.options||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
+}
+
+function fieldHtml(f,val){
+  val=val||'';
+  var id='fld_'+f.id, req=f.required?' <span class="req">*</span>':'', inp='';
+  if(f.type==='textarea'){
+    inp='<textarea data-fid="'+f.id+'" id="'+id+'" rows="3">'+esc(val)+'</textarea>';
+  }else if(f.type==='select'){
+    inp='<select data-fid="'+f.id+'" id="'+id+'"><option value="">— Pilih —</option>'+
+      optList(f).map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';
+  }else if(f.type==='radio'){
+    inp='<div class="radios" data-fid="'+f.id+'" data-radio="1">'+
+      optList(f).map(function(o){
+        return '<label class="radio"><input type="radio" name="r_'+f.id+'_'+Math.random().toString(36).slice(2,6)+'" value="'+esc(o)+'"'+(o===val?' checked':'')+'><span>'+esc(o)+'</span></label>';
+      }).join('')+'</div>';
+  }else{
+    inp='<input type="'+f.type+'" data-fid="'+f.id+'" id="'+id+'" value="'+esc(val)+'">';
+  }
+  return '<div class="field"><label for="'+id+'">'+esc(f.label)+req+'</label>'+inp+'</div>';
+}
+
+function collectForm(root,fields){
+  var data={};
+  fields.forEach(function(f){
+    var el=root.querySelector('[data-fid="'+f.id+'"]'); if(!el) return;
+    if(el.dataset.radio){var c=el.querySelector('input:checked');data[f.id]=c?c.value:'';}
+    else data[f.id]=el.value.trim();
+  });
+  return data;
+}
+
+function missingRequired(fields,data){
+  for(var i=0;i<fields.length;i++){
+    if(fields[i].required&&!data[fields[i].id]) return fields[i].label;
+  }
+  return null;
+}
+
+function cardHtml(cfg,fields,rec){
+  var ts=rec.tipe==='ts', mode=ts?'ts':'pk';
+  var rows=fields.filter(function(f){return f.active&&(!f.untuk||f.untuk==='semua'||f.untuk===mode)&&(!f.sasaran||!f.sasaran.length||f.sasaran.indexOf(rec.kategori)>=0);}).map(function(f){
+    return '<tr><td>'+esc(f.label)+'</td><td>'+esc(rec.data[f.id]||'-')+'</td></tr>';
+  }).join('');
+  var qr='https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data='+encodeURIComponent(rec.nomor);
+  var lst=(ts?rec.talkshow_list:rec.jenis_list)||[], lbl=ts?'Talkshow':'Pemeriksaan';
+  if(!lst.length){var nm=ts?rec.talkshow_nama:rec.jenis_nama; if(nm) lst=String(nm).split(/\s*\|\s*|,\s+/);}
+  var itemHtml=lst.length>1?lst.map(function(x){return '• '+esc(x);}).join('<br>'):esc(lst[0]||'-');
+  if(lst.length) rows='<tr><td>'+lbl+(lst.length>1?' ('+lst.length+')':'')+'</td><td>'+itemHtml+'</td></tr>'+rows;
+  if(rec.kategori_nama) rows='<tr><td>Kategori</td><td>'+esc(rec.kategori_nama)+'</td></tr>'+rows;
+  var info=[cfg.tanggal,cfg.lokasi].filter(Boolean).map(esc).join(' · ');
+  return '<div class="kartu'+(lst.length>4?' k-small':'')+'">'+
+    '<div class="k-head">'+(cfg.logoUrl?'<img src="'+esc(cfg.logoUrl)+'">':'')+
+      '<div><b>'+esc(cfg.eventName)+'</b><small>'+esc(cfg.namaInstansi)+'</small></div></div>'+
+    '<div class="k-no"><small>NOMOR PENDAFTARAN</small><b>'+esc(rec.nomor)+'</b></div>'+
+    '<div class="k-body"><table>'+rows+'</table><img class="k-qr" src="'+qr+'"></div>'+
+    '<div class="k-foot">'+(info?info+'<br>':'')+esc((ts?cfg.catatanKartuTalkshow:cfg.catatanKartu)||'')+'</div></div>';
+}
+
+function printCard(cfg,fields,rec){ printCards(cfg,fields,[rec]); }
+
+function printHtml(html,wait){
+  var area=$('printArea'); area.innerHTML=html;
+  var imgs=Array.prototype.slice.call(area.querySelectorAll('img'));
+  var waits=imgs.map(function(im){
+    return new Promise(function(r){ if(im.complete) r(); else {im.onload=r;im.onerror=r;} });
+  });
+  Promise.race([Promise.all(waits),new Promise(function(r){setTimeout(r,wait||3000);})]).then(function(){ window.print(); });
+}
+
+function printCards(cfg,fields,recs){
+  var area=$('printArea');
+  var pages='';
+  for(var i=0;i<recs.length;i+=4){
+    pages+='<div class="kartu-page">'+recs.slice(i,i+4).map(function(r){return cardHtml(cfg,fields,r);}).join('')+'</div>';
+  }
+  area.innerHTML='<div class="kartu-grid">'+pages+'</div>';
+  var imgs=Array.prototype.slice.call(area.querySelectorAll('img'));
+  var waits=imgs.map(function(im){
+    return new Promise(function(r){ if(im.complete) r(); else {im.onload=r;im.onerror=r;} });
+  });
+  Promise.race([Promise.all(waits),new Promise(function(r){setTimeout(r,Math.min(20000,2500+recs.length*200));})]).then(function(){
+    window.print();
+  });
+}
+</script>

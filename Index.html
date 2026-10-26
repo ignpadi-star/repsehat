@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<?!= include('Style') ?>
+</head>
+<body>
+
+<div class="landing">
+<section class="hero" id="hero">
+  <video id="heroVideo" class="hero-video" autoplay muted loop playsinline hidden></video>
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+  <div class="hero-inner container">
+    <div>
+      <div class="brand"><img id="logo" alt="Logo" hidden><span id="orgName"></span></div>
+      <h1 id="eventName">Memuat…</h1>
+      <p class="sub" id="subtitle"></p>
+      <div class="chips" id="chips"></div>
+      <div class="cta"><button class="btn btn-accent btn-lg" id="btnDaftar" hidden>Daftar Pemeriksaan →</button>
+      <button class="btn btn-lg btn-outline" id="btnDaftarTs" hidden>🎤 Daftar Talkshow →</button></div>
+      <div class="closed" id="closedMsg" hidden></div>
+    </div>
+    <div class="hero-art">
+      <img id="heroImg" alt="Ilustrasi" hidden>
+      <svg id="heroFallback" class="art-fallback" viewBox="0 0 200 200" fill="none">
+        <circle cx="100" cy="100" r="92" fill="rgba(255,255,255,.12)"/>
+        <path d="M100 150s-44-26-44-60a24 24 0 0 1 44-13 24 24 0 0 1 44 13c0 34-44 60-44 60z" fill="#fff"/>
+        <rect x="92" y="78" width="16" height="44" rx="4" fill="var(--primary)"/>
+        <rect x="78" y="92" width="44" height="16" rx="4" fill="var(--primary)"/>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<section class="container k-sec" id="kuotaSection" hidden>
+  <div class="card">
+    <div class="k-head2"><h2 id="kuotaTitle">Jenis Pemeriksaan &amp; Kuota</h2><span>Diperbarui otomatis</span></div>
+    <div class="jgrid" id="kuotaGrid"></div>
+  </div>
+</section>
+
+<footer id="foot"></footer>
+</div>
+
+<div class="overlay" id="overlay" hidden>
+<section class="form-wrap" id="formSection" hidden>
+  <div class="card">
+    <button type="button" class="xbtn" data-close aria-label="Tutup">✕</button>
+    <h2>Formulir Pendaftaran</h2>
+    <p class="muted">Isi data dengan benar. Tanda <span class="req">*</span> wajib diisi.</p>
+    <form id="regForm" novalidate>
+      <div class="field" id="pkKatField" hidden>
+        <label>Mendaftar sebagai <span class="req">*</span></label>
+        <div class="peranbox" id="pkKat"></div>
+      </div>
+      <div class="field" id="jenisField" hidden>
+        <label>Jenis Pemeriksaan <span class="req">*</span></label>
+        <p class="hintline" id="jenisHint"></p>
+        <div class="jgrid" id="jenisBox"></div>
+      </div>
+      <div id="fieldsBox"></div>
+      <input class="hp" type="text" id="hp" tabindex="-1" autocomplete="off">
+      <button class="btn btn-lg" id="btnSubmit" type="submit" style="width:100%">Kirim Pendaftaran</button>
+    </form>
+  </div>
+</section>
+
+<section class="form-wrap" id="tsFormSection" hidden>
+  <div class="card">
+    <button type="button" class="xbtn" data-close aria-label="Tutup">✕</button>
+    <h2>Pendaftaran Talkshow</h2>
+    <p class="muted">Isi data dengan benar. Tanda <span class="req">*</span> wajib diisi.</p>
+    <form id="tsForm" novalidate>
+      <div class="field" id="tsKatField" hidden>
+        <label>Mendaftar sebagai <span class="req">*</span></label>
+        <div class="peranbox" id="tsKat"></div>
+      </div>
+      <div class="field" id="tsField">
+        <label>Pilih Talkshow <span class="req">*</span></label>
+        <p class="hintline" id="tsHint"></p>
+        <div class="jgrid" id="tsBox"></div>
+      </div>
+      <div id="tsFieldsBox"></div>
+      <input class="hp" type="text" id="hp2" tabindex="-1" autocomplete="off">
+      <button class="btn btn-lg" id="btnTsSubmit" type="submit" style="width:100%">Kirim Pendaftaran</button>
+    </form>
+  </div>
+</section>
+
+<section class="form-wrap" id="successSection" hidden>
+  <div class="card success">
+    <button type="button" class="xbtn" data-close aria-label="Tutup">✕</button>
+    <div class="tick">✓</div>
+    <h2>Pendaftaran Berhasil!</h2>
+    <p class="muted" id="sKegiatan" style="margin:0;font-weight:600"></p>
+    <p class="muted" style="margin-bottom:0">Simpan nomor pendaftaran Anda</p>
+    <div class="big" id="sNomor"></div>
+    <p class="muted" id="sJenis" style="margin:0 0 6px;font-weight:600;white-space:pre-line;text-align:left;display:inline-block"></p>
+    <img class="qr" id="sQr" alt="QR">
+    <p class="muted" id="sNote">Cetak atau screenshot kartu ini dan bawa saat pemeriksaan.</p>
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+      <button class="btn" id="btnPrint">🖨️ Cetak Kartu</button>
+      <button class="btn btn-ghost" id="btnAgain">Daftar Lagi</button>
+    </div>
+  </div>
+</section>
+
+<section class="form-wrap" id="dupSection" hidden>
+  <div class="card success">
+    <button type="button" class="xbtn" data-close aria-label="Tutup">✕</button>
+    <div class="tick" style="background:var(--accent);color:#1b1300">!</div>
+    <h2>Anda Sudah Terdaftar</h2>
+    <p class="muted" style="margin-bottom:0" id="dupMsg"></p>
+    <div class="big" id="dNomor"></div>
+    <p class="muted" id="dJenis" style="margin:0 0 6px;font-weight:600;white-space:pre-line;text-align:left;display:inline-block"></p>
+    <img class="qr" id="dQr" alt="QR">
+    <p class="muted" id="dNote">Simpan nomor registrasi ini dan tunjukkan saat pemeriksaan. Satu nama hanya dapat mendaftar satu kali.</p>
+    <button class="btn" id="btnDupClose" type="button">Mengerti</button>
+  </div>
+</section>
+</div>
+
+<div id="printArea"></div>
+<div id="toast"></div>
+
+<?!= include('JS_Shared') ?>
+<script>
+var CFG=null, FIELDS=[], LAST=null, KAT=[], JENIS=[], TS=[], MODE='pk';
+var P={
+  pk:{kat:'pkKat',katField:'pkKatField',field:'jenisField',box:'jenisBox',hint:'jenisHint',multi:'multi_pk',label:'jenis pemeriksaan',input:'jenis'},
+  ts:{kat:'tsKat',katField:'tsKatField',field:'tsField',box:'tsBox',hint:'tsHint',multi:'multi_ts',label:'talkshow',input:'tsid'}
+};
+function fieldsOf(mode,kid){
+  return FIELDS.filter(function(f){
+    if(f.untuk&&f.untuk!=='semua'&&f.untuk!==mode) return false;
+    if(!f.sasaran||!f.sasaran.length) return true;
+    return !!kid&&f.sasaran.indexOf(kid)>=0;   // field khusus kategori: tampil setelah kategori dipilih
+  });
+}
+/* Gambar ulang isian sesuai kategori; nilai yang sudah diketik dipertahankan. */
+function renderFields(kind,reset){
+  var box=kind==='ts'?$('tsFieldsBox'):$('fieldsBox'), old={};
+  if(!reset) Array.prototype.forEach.call(box.querySelectorAll('[data-fid]'),function(el){
+    if(el.dataset.radio){var c=el.querySelector('input:checked');old[el.dataset.fid]=c?c.value:'';}
+    else old[el.dataset.fid]=el.value;
+  });
+  box.innerHTML=fieldsOf(kind,currentKat(kind)).map(function(f){return fieldHtml(f,old[f.id]||'');}).join('');
+}
+function itemsOf(kind){return kind==='ts'?TS:JENIS;}
+function katName(id){var k=KAT.filter(function(x){return x.id===id;})[0];return k?k.nama:id;}
+function allowed(item,kid){return !item.sasaran||!item.sasaran.length||item.sasaran.indexOf(kid)>=0;}
+function currentKat(kind){
+  var c=document.querySelector('#'+P[kind].kat+' input:checked');
+  if(c) return c.value;
+  return KAT.length===1?KAT[0].id:'';
+}
+function selIds(kind){
+  return Array.prototype.map.call(document.querySelectorAll('#'+P[kind].box+' input:checked'),function(i){return i.value;});
+}
+function availFor(kind,kid){
+  return itemsOf(kind).filter(function(x){return !KAT.length||allowed(x,kid);});
+}
+
+function kuotaText(j){
+  if(j.kuota===null) return 'Tanpa batas kuota';
+  if(j.penuh) return '<span class="tagfull">PENUH</span>';
+  return 'Sisa <strong>'+j.sisa+'</strong> dari '+j.kuota;
+}
+function tagHtml(j,kind){
+  var who='';
+  if(j.sasaran&&j.sasaran.length) who=j.sasaran.length===1?' · Khusus '+katName(j.sasaran[0]):' · '+j.sasaran.map(katName).join(' & ');
+  return '<em class="jtag">'+(kind==='ts'?'🎤 Talkshow':'🩺 Pemeriksaan')+esc(who)+'</em>';
+}
+function jcardHtml(j,kind){
+  var pct=j.kuota===null?0:(j.kuota===0?100:Math.min(100,Math.round(j.terpakai*100/j.kuota)));
+  var low=j.kuota!==null&&!j.penuh&&j.sisa<=Math.ceil(j.kuota*0.1);
+  var cls='jcard'+(j.penuh?' full':(low?' low':''));
+  return '<div class="'+cls+'">'+tagHtml(j,kind)+'<b>'+esc(j.nama)+'</b><small>'+kuotaText(j)+'</small>'+
+    (j.kuota!==null?'<div class="jbar"><i style="width:'+pct+'%"></i></div>':'')+'</div>';
+}
+
+/* ---- pilihan kategori (Anak / Orang Tua) + pilihan jenis/talkshow yang mengikutinya ---- */
+function renderKat(kind){
+  var c=P[kind], keep=document.querySelector('#'+c.kat+' input:checked'); keep=keep?keep.value:'';
+  $(c.katField).hidden=KAT.length<2;   // satu kategori saja: dipilih otomatis, tidak perlu ditampilkan
+  $(c.kat).innerHTML=KAT.length<2?'':KAT.map(function(k){
+    return '<label class="prn"><input type="radio" name="kat_'+kind+'" value="'+esc(k.id)+'"'+(keep===k.id?' checked':'')+'> '+esc(k.nama)+'</label>';
+  }).join('');
+}
+function renderPicker(kind){
+  var c=P[kind], list=itemsOf(kind), kid=currentKat(kind), kobj=KAT.filter(function(x){return x.id===kid;})[0];
+  var prev=selIds(kind);
+  $(c.field).hidden=list.length===0;
+  if(!list.length){$(c.box).innerHTML='';return;}
+  if(KAT.length>1&&!kid){
+    $(c.hint).textContent='Pilih dulu Anda mendaftar sebagai siapa.';
+    $(c.box).innerHTML='';return;
+  }
+  var multi=kobj?kobj[c.multi]:true, avail=availFor(kind,kid);
+  $(c.hint).textContent=avail.length?(multi?'Boleh memilih lebih dari satu.':'Pilih satu.'):'Belum ada '+c.label+' untuk kategori ini.';
+  $(c.box).innerHTML=avail.map(function(t){
+    return '<label class="jopt'+(t.penuh?' dis':'')+'"><input type="'+(multi?'checkbox':'radio')+'" name="'+c.input+'" value="'+esc(t.id)+'"'+(t.penuh?' disabled':'')+
+      (prev.indexOf(t.id)>=0&&!t.penuh?' checked':'')+'>'+jcardHtml(t,kind)+'</label>';
+  }).join('');
+}
+['pk','ts'].forEach(function(kind){
+  $(P[kind].kat).onchange=function(){
+    Array.prototype.forEach.call(document.querySelectorAll('#'+P[kind].box+' input:checked'),function(i){i.checked=false;});
+    renderPicker(kind);
+    renderFields(kind);
+  };
+});
+function renderJenis(){
+  var has=JENIS.length>0;
+  $('kuotaSection').hidden=!(has||TS.length);
+  $('kuotaTitle').innerHTML=has&&TS.length?'Pemeriksaan, Talkshow &amp; Kuota':(TS.length?'Talkshow &amp; Kuota':'Jenis Pemeriksaan &amp; Kuota');
+  $('kuotaGrid').innerHTML=JENIS.map(function(j){return jcardHtml(j,'pk');}).join('')+TS.map(function(t){return jcardHtml(t,'ts');}).join('');
+  renderKat('pk');renderKat('ts');renderPicker('pk');renderPicker('ts');
+}
+function applyPublic(p){
+  KAT=p.kategori||[];JENIS=p.jenis||[];TS=p.talkshow||[];
+}
+function refreshKuota(){
+  api('getPublicConfig').then(function(p){applyPublic(p);renderJenis();}).catch(function(){});
+}
+
+function show(cfgPayload){
+  CFG=cfgPayload.settings; FIELDS=cfgPayload.fields;
+  applyTheme(CFG);
+  document.title=CFG.eventName;
+  $('eventName').textContent=CFG.eventName;
+  $('orgName').textContent=CFG.namaInstansi||'';
+  $('subtitle').textContent=CFG.subtitle||'';
+  $('foot').textContent='© '+new Date().getFullYear()+' '+(CFG.namaInstansi||'');
+  if(CFG.logoUrl){$('logo').src=CFG.logoUrl;$('logo').hidden=false;}
+  if(CFG.heroUrl){$('heroImg').src=CFG.heroUrl;$('heroImg').hidden=false;$('heroFallback').style.display='none';}
+  if(CFG.videoUrl){var v=$('heroVideo');v.src=CFG.videoUrl;v.hidden=false;v.play&&v.play().catch(function(){});}
+  var chips=[];
+  if(CFG.tanggal) chips.push('📅 '+CFG.tanggal);
+  if(CFG.lokasi) chips.push('📍 '+CFG.lokasi);
+  $('chips').innerHTML=chips.map(function(c){return '<span class="chip">'+esc(c)+'</span>';}).join('');
+  var open=String(CFG.registrationOpen)==='true';
+  applyPublic(cfgPayload);
+  $('btnDaftar').hidden=!open;
+  $('btnDaftarTs').hidden=!(open&&TS.length);
+  $('closedMsg').hidden=open;
+  $('closedMsg').textContent=CFG.closedMessage||'';
+  renderJenis();
+  renderFields('pk',true);renderFields('ts',true);
+}
+
+function openOverlay(which){
+  $('overlay').hidden=false;
+  $('formSection').hidden=which!=='form';
+  $('tsFormSection').hidden=which!=='tsform';
+  $('successSection').hidden=which!=='success';
+  $('dupSection').hidden=which!=='dup';
+  document.body.style.overflow='hidden';
+  $('overlay').scrollTop=0;
+}
+function closeOverlay(){
+  $('overlay').hidden=true;
+  document.body.style.overflow='';
+}
+Array.prototype.forEach.call(document.querySelectorAll('[data-close]'),function(b){b.onclick=closeOverlay;});
+$('overlay').onclick=function(e){ if(e.target===$('overlay')&&(!$('formSection').hidden||!$('tsFormSection').hidden)) closeOverlay(); };
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&!$('overlay').hidden) closeOverlay(); });
+
+function resetForm(){
+  ['pk','ts'].forEach(function(kind){
+    Array.prototype.forEach.call(document.querySelectorAll('#'+P[kind].kat+' input:checked,#'+P[kind].box+' input:checked'),function(i){i.checked=false;});
+    renderPicker(kind);
+  });
+  renderFields('pk',true);renderFields('ts',true);
+}
+function bullets(list){return (list||[]).length>1?list.map(function(x){return '• '+x;}).join('\n'):(list||[])[0]||'';}
+function showDup(rec,data){
+  var uf=fieldsOf(MODE,currentKat(MODE)).filter(function(f){return f.unique;})[0];
+  var who=(uf&&data[uf.id])?((rec.label||uf.label)+' "'+data[uf.id]+'"'):(rec.label||'Data Anda');
+  $('dupMsg').textContent=who+' sudah pernah terdaftar. Nomor registrasi:';
+  $('dNomor').textContent=rec.nomor;
+  var list=MODE==='ts'?rec.talkshow_list:rec.jenis_list;
+  $('dJenis').textContent=list&&list.length?((MODE==='ts'?'Talkshow: ':'Jenis pemeriksaan: ')+(list.length>1?'\n':'')+bullets(list)):'';
+  $('dNote').textContent=MODE==='ts'?'Simpan nomor registrasi ini dan tunjukkan saat talkshow. Satu nama hanya mendapat satu kartu; jika ingin menambah/mengubah pilihan, hubungi panitia.':'Simpan nomor registrasi ini dan tunjukkan saat pemeriksaan. Satu nama hanya mendapat satu kartu; jika ingin menambah/mengubah pilihan, hubungi panitia.';
+  $('dQr').src='https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data='+encodeURIComponent(rec.nomor);
+  openOverlay('dup');
+}
+$('btnDupClose').onclick=function(){ closeOverlay(); resetForm(); };
+
+$('btnDaftar').onclick=function(){ MODE='pk'; openOverlay('form'); };
+$('btnDaftarTs').onclick=function(){ MODE='ts'; openOverlay('tsform'); };
+
+function showSuccess(rec,kind){
+  LAST=rec;
+  var list=kind==='ts'?rec.talkshow_list:rec.jenis_list;
+  $('sKegiatan').textContent=(kind==='ts'?'Talkshow':'Pemeriksaan Kesehatan')+(rec.kategori_nama?' · '+rec.kategori_nama:'');
+  $('sNote').textContent='Cetak atau screenshot kartu ini dan bawa saat '+(kind==='ts'?'talkshow':'pemeriksaan')+'.';
+  $('sNomor').textContent=rec.nomor;
+  $('sJenis').textContent=list&&list.length?((list.length>1?(kind==='ts'?'Talkshow:\n':'Pemeriksaan:\n'):'')+bullets(list)):'';
+  $('sQr').src='https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data='+encodeURIComponent(rec.nomor);
+  openOverlay('success');
+}
+function submitKind(kind,ev){
+  ev.preventDefault(); MODE=kind;
+  var box=kind==='ts'?$('tsFieldsBox'):$('fieldsBox');
+  var kid=currentKat(kind), ids=selIds(kind), F=fieldsOf(kind,kid);
+  if(KAT.length&&!kid){toast('Pilih dulu Anda mendaftar sebagai siapa.','err');return;}
+  if(itemsOf(kind).length&&availFor(kind,kid).length&&!ids.length){toast('Pilih minimal satu '+P[kind].label+'.','err');return;}
+  var data=collectForm(box,F);
+  var miss=missingRequired(F,data);
+  if(miss){toast('"'+miss+'" wajib diisi.','err');return;}
+  var b=$(kind==='ts'?'btnTsSubmit':'btnSubmit'); b.disabled=true; b.textContent='Mengirim…';
+  api(kind==='ts'?'submitTalkshow':'submitRegistration',data,$(kind==='ts'?'hp2':'hp').value,kid,ids).then(function(rec){
+    if(rec&&rec.duplicate){ showDup(rec,data); return; }
+    showSuccess(rec,kind);
+  }).catch(function(e){toast(e.message,'err');})
+  .then(function(){b.disabled=false;b.textContent='Kirim Pendaftaran';refreshKuota();});
+}
+$('regForm').onsubmit=function(ev){submitKind('pk',ev);};
+$('tsForm').onsubmit=function(ev){submitKind('ts',ev);};
+
+$('btnPrint').onclick=function(){ if(LAST) printCard(CFG,FIELDS.map(function(f){f.active=true;return f;}),LAST); };
+$('btnAgain').onclick=function(){
+  resetForm();
+  openOverlay(MODE==='ts'?'tsform':'form');
+};
+
+setInterval(function(){ if(!document.hidden&&!$('btnSubmit').disabled&&!$('btnTsSubmit').disabled) refreshKuota(); },60000);
+
+api('getPublicConfig').then(show).catch(function(e){
+  $('eventName').textContent='Gagal memuat';
+  toast(e.message,'err');
+});
+</script>
+</body>
+</html>
